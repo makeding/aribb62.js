@@ -198,7 +198,7 @@ class B62TTMLRenderer {
             return;
         }
 
-        renderTTMLCueDOM(overlay, cue, this._styleOptions);
+        renderTTMLCueDOM(overlay, cue, this._styleOptions, mediaElement);
     }
 
     _decodeText(data) {
@@ -347,17 +347,18 @@ class B62TTMLRenderer {
     }
 }
 
-function renderTTMLCueDOM(overlay, cue, styleOptions) {
+function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     styleOptions = styleOptions || {};
-    const overlayWidth = overlay.clientWidth || 1;
-    const overlayHeight = overlay.clientHeight || 1;
+    const viewport = getMediaContentViewport(overlay, mediaElement);
+    const overlayWidth = viewport.width || 1;
+    const overlayHeight = viewport.height || 1;
     const planeWidth = cue.plane[0] || 3840;
     const planeHeight = cue.plane[1] || 2160;
     const scale = Math.min(overlayWidth / planeWidth, overlayHeight / planeHeight);
     const contentWidth = planeWidth * scale;
     const contentHeight = planeHeight * scale;
-    const marginX = (overlayWidth - contentWidth) / 2;
-    const marginY = (overlayHeight - contentHeight) / 2;
+    const marginX = viewport.left + (overlayWidth - contentWidth) / 2;
+    const marginY = viewport.top + (overlayHeight - contentHeight) / 2;
 
     if ((cue.fontFaces && cue.fontFaces.length > 0) || (cue.keyframes && cue.keyframes.length > 0) || cue.hasMarquee) {
         overlay.appendChild(createCueStyleElement(cue, scale));
@@ -423,6 +424,42 @@ function renderTTMLCueDOM(overlay, cue, styleOptions) {
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
     });
+}
+
+function getMediaContentViewport(overlay, mediaElement) {
+    const overlayWidth = overlay.clientWidth || 1;
+    const overlayHeight = overlay.clientHeight || 1;
+    if (!mediaElement || !mediaElement.videoWidth || !mediaElement.videoHeight || !overlay.getBoundingClientRect || !mediaElement.getBoundingClientRect) {
+        return { left: 0, top: 0, width: overlayWidth, height: overlayHeight };
+    }
+
+    const overlayRect = overlay.getBoundingClientRect();
+    const mediaRect = mediaElement.getBoundingClientRect();
+    const mediaLeft = mediaRect.left - overlayRect.left;
+    const mediaTop = mediaRect.top - overlayRect.top;
+    const mediaWidth = mediaRect.width || overlayWidth;
+    const mediaHeight = mediaRect.height || overlayHeight;
+    const videoAspect = mediaElement.videoWidth / mediaElement.videoHeight;
+    const elementAspect = mediaWidth / mediaHeight;
+    let contentWidth = mediaWidth;
+    let contentHeight = mediaHeight;
+    let contentLeft = mediaLeft;
+    let contentTop = mediaTop;
+
+    if (elementAspect > videoAspect) {
+        contentWidth = mediaHeight * videoAspect;
+        contentLeft += (mediaWidth - contentWidth) / 2;
+    } else if (elementAspect < videoAspect) {
+        contentHeight = mediaWidth / videoAspect;
+        contentTop += (mediaHeight - contentHeight) / 2;
+    }
+
+    return {
+        left: contentLeft,
+        top: contentTop,
+        width: contentWidth,
+        height: contentHeight
+    };
 }
 
 function renderTTMLSpanDOM(span, scale, styleOptions) {
