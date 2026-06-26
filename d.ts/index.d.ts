@@ -41,6 +41,8 @@ export interface B62TTMLPushResult {
   packetId?: number
   cueCount: number
   cues: object[]
+  audioCount: number
+  audios: B62TTMLAudioCue[]
   text: string
   pts?: number
   basePts: number | null
@@ -57,6 +59,16 @@ export interface B62TTMLSpanCue {
   style: Record<string, string>
 }
 
+export interface B62TTMLAudioCue {
+  id: string
+  src: string
+  resolvedSrc: string
+  loop: boolean
+  begin: number | null
+  end: number | null
+  dur: number | null
+}
+
 export interface B62TTMLBlockCue {
   region: object | null
   style: Record<string, string>
@@ -69,6 +81,10 @@ export interface B62TTMLCue {
   end: number
   clear: boolean
   plane: [number, number]
+  fontFaces?: object[]
+  keyframes?: object[]
+  hasMarquee?: boolean
+  audios?: B62TTMLAudioCue[]
   blocks: B62TTMLBlockCue[]
 }
 

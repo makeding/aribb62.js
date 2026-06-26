@@ -13,6 +13,9 @@ Implemented renderer basics:
 - ARIB-TTML `arib-tt:ruby` spans linked to a base element by `xml:id`
 - `smpte:backgroundImage` with embedded `smpte:image` or same-MPU `subt://n` resources
 - `arib-tt:font-face` with same-MPU `subt://n` font resources
+- ARIB-TTML extension CSS mapping for `arib-tt:border`, `arib-tt:letter-spacing`, `arib-tt:text-shadow`, `arib-tt:marquee`, `arib-tt:keyframes`, and `arib-tt:animation`
+- `dur` and `indefinite` timing for live-mode continued presentation
+- `arib-tt:audio` metadata extraction (`romsound://n` and `subt://n` are exposed, playback is left to the host)
 - UTF-8 text with LF/TAB preserved for browser `pre-wrap` rendering
 
 ```js
