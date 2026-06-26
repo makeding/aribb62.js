@@ -369,6 +369,7 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         const origin = region.origin || [planeWidth * 0.1, planeHeight * 0.78];
         const extent = region.extent || [planeWidth * 0.8, planeHeight * 0.16];
         const writingMode = mapWritingMode(block.style.writingMode);
+        const isHorizontalWriting = !writingMode.writingMode || writingMode.writingMode === 'horizontal-tb';
         const blockElement = document.createElement('div');
         blockElement.className = 'ttml-subtitle-block';
         blockElement.style.position = 'absolute';
@@ -381,7 +382,8 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.left = (marginX + origin[0] * scale) + 'px';
         blockElement.style.top = (marginY + origin[1] * scale) + 'px';
         blockElement.style.width = (extent[0] * scale) + 'px';
-        blockElement.style.minHeight = (extent[1] * scale) + 'px';
+        blockElement.style.height = (extent[1] * scale) + 'px';
+        blockElement.style.overflow = 'visible';
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.textAlign = block.style.textAlign || 'center';
@@ -410,7 +412,7 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         line.style.boxSizing = 'border-box';
         line.style.display = 'inline-block';
         line.style.width = 'auto';
-        line.style.maxWidth = '100%';
+        line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
         line.style.tabSize = '1em';
         const lineBackgroundColor = styleOptions.forceBackgroundColor || (styleOptions.lineBackground ? blockElement.style.backgroundColor : '');
         if (lineBackgroundColor) {
