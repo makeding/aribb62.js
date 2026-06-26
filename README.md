@@ -6,6 +6,8 @@ This project intentionally stays outside `mmts.js`: `mmts.js` demuxes MMTS and e
 
 There is no build step. The package exports `src/index.js` directly as an ES module and also installs `window.aribb62js` when loaded in a browser.
 
+Serve this directory with any static file server and open `/demo/`.
+
 Implemented renderer basics:
 
 - TTML timing, regions, color, font size, line height, and display alignment

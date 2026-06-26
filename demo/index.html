@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aribb62.js demo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #16181c;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto;
+    }
+
+    .stage {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.18) 0 25%, transparent 25% 50%, rgba(255,255,255,.14) 50% 75%, transparent 75%),
+        linear-gradient(160deg, #18344b, #607f74 44%, #a97843 100%);
+      background-size: 72px 72px, cover;
+      border: 1px solid #222831;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 78% 22%, rgba(255,255,255,.32), transparent 16%),
+        linear-gradient(to top, rgba(0,0,0,.42), transparent 46%);
+    }
+
+    #subtitleOverlay {
+      position: absolute;
+      inset: 0;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 14px 0;
+    }
+
+    button {
+      min-height: 34px;
+      padding: 4px 12px;
+      border: 1px solid #59616d;
+      border-radius: 5px;
+      background: #fff;
+      color: #111;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .time {
+      min-width: 110px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    textarea,
+    pre {
+      width: 100%;
+      border: 1px solid #c1c7cf;
+      background: #fff;
+      color: #111;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    textarea {
+      min-height: 260px;
+      padding: 10px;
+      resize: vertical;
+    }
+
+    pre {
+      min-height: 72px;
+      margin: 12px 0 0;
+      padding: 10px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="stage">
+      <div id="subtitleOverlay"></div>
+    </div>
+
+    <div class="controls">
+      <button id="loadBasic">Basic</button>
+      <button id="loadVertical">Vertical</button>
+      <button id="loadAudio">Audio metadata</button>
+      <button id="restart">Restart</button>
+      <button id="playPause">Pause</button>
+      <span class="time" id="timeLabel">0.00 / 12.00</span>
+      <button id="renderInput">Render input</button>
+    </div>
+
+    <textarea id="ttmlInput" spellcheck="false"></textarea>
+    <pre id="status"></pre>
+  </main>
+
+  <script type="module">
+    import { B62TTMLRenderer } from '../src/index.js';
+
+    const overlay = document.getElementById('subtitleOverlay');
+    const input = document.getElementById('ttmlInput');
+    const status = document.getElementById('status');
+    const timeLabel = document.getElementById('timeLabel');
+    const playPause = document.getElementById('playPause');
+
+    const samples = {
+      basic: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-ttml/v1_0"
+    ttp:extent="3840px 2160px" xml:lang="ja">
+  <head>
+    <styling>
+      <style xml:id="base" tts:fontFamily="丸ゴシック" tts:fontSize="120px" tts:lineHeight="150px"
+             tts:color="white" tts:textAlign="center" arib-tt:border="solid 3px black"
+             arib-tt:text-shadow="5px 5px 2px black"/>
+      <style xml:id="marquee" style="base" arib-tt:marquee="scroll reverse normal 1"/>
+      <arib-tt:keyframes animationName="fadeMove">
+        <arib-tt:keyframe position="0%" tts:opacity="0" tts:origin="0px 30px"/>
+        <arib-tt:keyframe position="100%" tts:opacity="1" tts:origin="0px 0px"/>
+      </arib-tt:keyframes>
+      <style xml:id="animated" style="base" arib-tt:animation="fadeMove 900ms ease-out 0ms 1 normal"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:origin="240px 1480px" tts:extent="3360px 420px" tts:displayAlign="center"/>
+    </layout>
+  </head>
+  <body>
+    <div>
+      <p begin="00:00:00.200" end="00:00:04.800" region="bottom" style="animated">
+        <span xml:id="ji">仁和寺</span><span arib-tt:ruby="ji">にんなじ</span>　京都市右京区
+      </p>
+      <p begin="00:00:05.000" end="00:00:09.500" region="bottom" style="marquee">♪〜　春の特別公開　♪〜</p>
+    </div>
+  </body>
+</tt>`,
+      vertical: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-ttml/v1_0"
+    ttp:extent="3840px 2160px" xml:lang="ja">
+  <head>
+    <styling>
+      <style xml:id="verticalStyle" tts:fontFamily="角ゴシック" tts:fontSize="112px"
+             tts:lineHeight="132px" tts:color="#ffffffff" tts:writingMode="tbrl"
+             arib-tt:letter-spacing="8px" arib-tt:border="solid 3px #000000ff"/>
+    </styling>
+    <layout>
+      <region xml:id="right" tts:origin="2920px 180px" tts:extent="520px 1640px" tts:displayAlign="before"/>
+    </layout>
+  </head>
+  <body>
+    <div>
+      <p begin="00:00:01.000" dur="indefinite" region="right" style="verticalStyle">縦書き字幕表示</p>
+    </div>
+  </body>
+</tt>`,
+      audio: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-ttml/v1_0"
+    ttp:extent="3840px 2160px" xml:lang="ja">
+  <head>
+    <styling>
+      <style xml:id="base" tts:fontSize="118px" tts:lineHeight="148px" tts:color="white"
+             tts:textAlign="center" arib-tt:border="solid 3px black"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:origin="240px 1480px" tts:extent="3360px 420px" tts:displayAlign="center"/>
+    </layout>
+  </head>
+  <body>
+    <div begin="00:00:01.000" end="00:00:05.000">
+      <arib-tt:audio src="romsound://2" loop="false"/>
+      <p region="bottom" style="base">内蔵音 metadata: romsound://2</p>
+    </div>
+    <div begin="00:00:06.000" end="00:00:08.000">
+      <arib-tt:audio src="subt://1" loop="true"/>
+    </div>
+  </body>
+</tt>`
+    };
+
+    const media = new EventTarget();
+    media.currentTime = 0;
+    media.duration = 12;
+
+    let playing = true;
+    let lastTick = performance.now();
+    let lastResult = null;
+
+    const renderer = new B62TTMLRenderer({
+      mediaElement: media,
+      overlayElement: overlay,
+      isLive: false
+    });
+
+    function pushCurrentText() {
+      renderer.clear();
+      media.currentTime = 0;
+      lastTick = performance.now();
+      lastResult = renderer.push({
+        packetId: 0x100,
+        mpuSequenceNumber: Date.now(),
+        pts: 0,
+        text: input.value,
+        resources: [
+          { index: 1, url: 'data:audio/mpeg;base64,' }
+        ]
+      });
+      renderer.render();
+      updateStatus();
+    }
+
+    function setSample(name) {
+      input.value = samples[name];
+      pushCurrentText();
+    }
+
+    function tick(now) {
+      if (playing) {
+        media.currentTime += (now - lastTick) / 1000;
+        if (media.currentTime > media.duration) {
+          media.currentTime = 0;
+          renderer.render();
+        }
+        media.dispatchEvent(new Event('timeupdate'));
+      }
+      lastTick = now;
+      updateStatus();
+      requestAnimationFrame(tick);
+    }
+
+    function updateStatus() {
+      timeLabel.textContent = media.currentTime.toFixed(2) + ' / ' + media.duration.toFixed(2);
+      if (!lastResult) {
+        status.textContent = '';
+        return;
+      }
+      status.textContent = [
+        'events=' + lastResult.eventCount,
+        'cues=' + lastResult.cueCount,
+        'audios=' + lastResult.audioCount,
+        'preview=' + lastResult.preview,
+        lastResult.audios.map((audio) => 'audio src=' + audio.src + ' resolved=' + audio.resolvedSrc + ' loop=' + audio.loop).join('\\n')
+      ].filter(Boolean).join('\\n');
+    }
+
+    document.getElementById('loadBasic').addEventListener('click', () => setSample('basic'));
+    document.getElementById('loadVertical').addEventListener('click', () => setSample('vertical'));
+    document.getElementById('loadAudio').addEventListener('click', () => setSample('audio'));
+    document.getElementById('renderInput').addEventListener('click', pushCurrentText);
+    document.getElementById('restart').addEventListener('click', () => {
+      media.currentTime = 0;
+      renderer.render();
+    });
+    playPause.addEventListener('click', () => {
+      playing = !playing;
+      playPause.textContent = playing ? 'Pause' : 'Play';
+      media.dispatchEvent(new Event(playing ? 'play' : 'pause'));
+    });
+
+    setSample('basic');
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
