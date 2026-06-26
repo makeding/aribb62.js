@@ -17,7 +17,8 @@ class B62TTMLRenderer {
             normalFont: options.normalFont || options.fontFamily || '',
             forceStrokeColor: options.forceStrokeColor,
             forceBackgroundColor: options.forceBackgroundColor || '',
-            backgroundPadding: options.backgroundPadding || '0 0.08em'
+            backgroundPadding: options.backgroundPadding || '0 0.08em',
+            lineBackground: !!options.lineBackground
         };
         this._cues = [];
         this._lastCueKey = null;
@@ -410,9 +411,10 @@ function renderTTMLCueDOM(overlay, cue, styleOptions) {
         line.style.width = 'auto';
         line.style.maxWidth = '100%';
         line.style.tabSize = '1em';
-        if (styleOptions.forceBackgroundColor) {
+        const lineBackgroundColor = styleOptions.forceBackgroundColor || (styleOptions.lineBackground ? blockElement.style.backgroundColor : '');
+        if (lineBackgroundColor) {
             blockElement.style.backgroundColor = '';
-            line.style.backgroundColor = styleOptions.forceBackgroundColor;
+            line.style.backgroundColor = lineBackgroundColor;
             line.style.padding = styleOptions.backgroundPadding;
         }
         block.spans.forEach((span) => {

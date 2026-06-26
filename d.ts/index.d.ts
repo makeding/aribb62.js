@@ -8,6 +8,7 @@ export interface B62TTMLRendererOptions {
   forceStrokeColor?: boolean | string
   forceBackgroundColor?: string
   backgroundPadding?: string
+  lineBackground?: boolean
 }
 
 export interface B62TTMLResource {
