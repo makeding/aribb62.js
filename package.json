@@ -1,0 +1,27 @@
+{
+  "name": "aribb62.js",
+  "version": "0.1.0",
+  "description": "ARIB STD-B62 / ARIB-TTML parser and browser renderer",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "types": "./d.ts/index.d.ts",
+  "files": [
+    "src",
+    "d.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./d.ts/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "author": "huggy",
+  "license": "MIT",
+  "keywords": [
+    "arib",
+    "b62",
+    "ttml",
+    "subtitle"
+  ]
+}
