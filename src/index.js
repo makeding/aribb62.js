@@ -473,7 +473,8 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
         applyTTMLResourceStyle(blockStyle, embeddedImages, options.resourceResolver);
         const spans = parseTTMLSpans(pNode, styles, blockStyle);
         const audios = collectTTMLAudios(pNode, rawStart, rawEnd, rawDur, options.resourceResolver);
-        if (spans.length === 0 && !blockStyle.backgroundImageUrl) {
+        const hasVisual = spans.length > 0 || !!blockStyle.backgroundImageUrl;
+        if (!hasVisual && audios.length === 0) {
             return;
         }
 
@@ -481,12 +482,37 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
             index: index,
             rawStart: rawStart,
             rawEnd: rawEnd,
-            block: {
+            block: hasVisual ? {
                 region: region,
                 style: blockStyle,
                 spans: spans
-            },
+            } : null,
             audios: audios
+        });
+    });
+
+    descendantsByLocalName(body, 'audio').forEach((audioNode, index) => {
+        if (hasAncestorByLocalName(audioNode, 'p')) {
+            return;
+        }
+        const timingNode = nearestTimedNode(audioNode);
+        let rawStart = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'begin')) : null;
+        let rawEnd = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'end')) : null;
+        const rawDur = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'dur')) : null;
+        if (rawEnd === null && rawDur !== null && rawStart !== null) {
+            rawEnd = rawDur === Infinity ? Infinity : rawStart + rawDur;
+        }
+
+        const audio = collectTTMLAudioNode(audioNode, rawStart, rawEnd, rawDur, options.resourceResolver);
+        if (!audio) {
+            return;
+        }
+        rawCues.push({
+            index: pNodes.length + index,
+            rawStart: rawStart,
+            rawEnd: rawEnd,
+            block: null,
+            audios: [audio]
         });
     });
 
@@ -522,9 +548,9 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
             plane: plane,
             fontFaces: fontFaces,
             keyframes: keyframes,
-            hasMarquee: blockTreeHasMarquee(raw.block),
+            hasMarquee: raw.block ? blockTreeHasMarquee(raw.block) : false,
             audios: offsetTTMLAudios(raw.audios, startOffset, start, end),
-            blocks: [raw.block]
+            blocks: raw.block ? [raw.block] : []
         };
     });
 }
@@ -1167,21 +1193,28 @@ function collectTTMLKeyframes(doc) {
 function collectTTMLAudios(pNode, rawStart, rawEnd, rawDur, resourceResolver) {
     const audios = [];
     descendantsByLocalName(pNode, 'audio').forEach((audioNode) => {
-        const src = getARIBTTMLAttr(audioNode, 'src') || getTTMLAttr(audioNode, 'src');
-        if (!src) {
-            return;
+        const audio = collectTTMLAudioNode(audioNode, rawStart, rawEnd, rawDur, resourceResolver);
+        if (audio) {
+            audios.push(audio);
         }
-        audios.push({
-            id: getXMLId(audioNode) || '',
-            src: normalizeResourceReference(src),
-            resolvedSrc: resolveTTMLResourceReference(src, {}, resourceResolver),
-            loop: parseBooleanAttr(getARIBTTMLAttr(audioNode, 'loop') || getTTMLAttr(audioNode, 'loop')),
-            begin: rawStart,
-            end: rawEnd,
-            dur: rawDur
-        });
     });
     return audios;
+}
+
+function collectTTMLAudioNode(audioNode, rawStart, rawEnd, rawDur, resourceResolver) {
+    const src = getARIBTTMLAttr(audioNode, 'src') || getTTMLAttr(audioNode, 'src');
+    if (!src) {
+        return null;
+    }
+    return {
+        id: getXMLId(audioNode) || '',
+        src: normalizeResourceReference(src),
+        resolvedSrc: resolveTTMLResourceReference(src, {}, resourceResolver),
+        loop: parseBooleanAttr(getARIBTTMLAttr(audioNode, 'loop') || getTTMLAttr(audioNode, 'loop')),
+        begin: rawStart,
+        end: rawEnd,
+        dur: rawDur
+    };
 }
 
 function offsetTTMLAudios(audios, offset, fallbackStart, fallbackEnd) {
@@ -1536,6 +1569,17 @@ function descendantsByLocalName(node, name) {
         }
     }
     return result;
+}
+
+function hasAncestorByLocalName(node, name) {
+    let current = node ? node.parentNode : null;
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+        if (localName(current) === name) {
+            return true;
+        }
+        current = current.parentNode;
+    }
+    return false;
 }
 
 function normalizeTTMLText(text) {
