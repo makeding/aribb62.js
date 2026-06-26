@@ -13,6 +13,12 @@ class B62TTMLRenderer {
         this._mediaElement = options.mediaElement || null;
         this._isLive = !!options.isLive;
         this._maxCues = options.maxCues || 300;
+        this._styleOptions = {
+            normalFont: options.normalFont || options.fontFamily || '',
+            forceStrokeColor: options.forceStrokeColor,
+            forceBackgroundColor: options.forceBackgroundColor || '',
+            backgroundPadding: options.backgroundPadding || '0 0.08em'
+        };
         this._cues = [];
         this._lastCueKey = null;
         this._clockId = null;
@@ -191,7 +197,7 @@ class B62TTMLRenderer {
             return;
         }
 
-        renderTTMLCueDOM(overlay, cue);
+        renderTTMLCueDOM(overlay, cue, this._styleOptions);
     }
 
     _decodeText(data) {
@@ -273,7 +279,8 @@ class B62TTMLRenderer {
         this._overlay.style.pointerEvents = 'none';
         this._overlay.style.overflow = 'hidden';
         if (!this._overlay.style.fontFamily) {
-            this._overlay.style.fontFamily = '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic Medium", "Meiryo", sans-serif';
+            this._overlay.style.fontFamily = this._styleOptions.normalFont ||
+                '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic Medium", "Meiryo", sans-serif';
         }
     }
 
@@ -339,7 +346,8 @@ class B62TTMLRenderer {
     }
 }
 
-function renderTTMLCueDOM(overlay, cue) {
+function renderTTMLCueDOM(overlay, cue, styleOptions) {
+    styleOptions = styleOptions || {};
     const overlayWidth = overlay.clientWidth || 1;
     const overlayHeight = overlay.clientHeight || 1;
     const planeWidth = cue.plane[0] || 3840;
@@ -375,8 +383,10 @@ function renderTTMLCueDOM(overlay, cue) {
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.textAlign = block.style.textAlign || 'center';
+        blockElement.style.alignItems = mapTextAlignItems(block.style.textAlign || 'center');
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
         applyTTMLStyle(blockElement, block.style, scale);
+        applyViewerStyle(blockElement, styleOptions);
         if (block.style.backgroundImageUrl) {
             blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
             blockElement.style.backgroundRepeat = 'no-repeat';
@@ -396,17 +406,24 @@ function renderTTMLCueDOM(overlay, cue) {
         const line = document.createElement('div');
         line.className = 'ttml-subtitle-line';
         line.style.boxSizing = 'border-box';
-        line.style.width = '100%';
+        line.style.display = 'inline-block';
+        line.style.width = 'auto';
+        line.style.maxWidth = '100%';
         line.style.tabSize = '1em';
+        if (styleOptions.forceBackgroundColor) {
+            blockElement.style.backgroundColor = '';
+            line.style.backgroundColor = styleOptions.forceBackgroundColor;
+            line.style.padding = styleOptions.backgroundPadding;
+        }
         block.spans.forEach((span) => {
-            line.appendChild(renderTTMLSpanDOM(span, scale));
+            line.appendChild(renderTTMLSpanDOM(span, scale, styleOptions));
         });
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
     });
 }
 
-function renderTTMLSpanDOM(span, scale) {
+function renderTTMLSpanDOM(span, scale, styleOptions) {
     if (span.rubyText) {
         const rubyElement = document.createElement('ruby');
         const baseElement = document.createElement('span');
@@ -416,6 +433,7 @@ function renderTTMLSpanDOM(span, scale) {
         rubyTextElement.style.fontSize = '50%';
         rubyTextElement.style.lineHeight = '1';
         applyTTMLStyle(rubyElement, span.style, scale);
+        applyViewerStyle(rubyElement, styleOptions);
         rubyElement.appendChild(baseElement);
         rubyElement.appendChild(rubyTextElement);
         return rubyElement;
@@ -424,6 +442,7 @@ function renderTTMLSpanDOM(span, scale) {
     const spanElement = document.createElement('span');
     spanElement.textContent = span.text;
     applyTTMLStyle(spanElement, span.style, scale);
+    applyViewerStyle(spanElement, styleOptions);
     return spanElement;
 }
 
@@ -802,6 +821,25 @@ function applyTTMLStyle(element, style, scale) {
     }
 }
 
+function applyViewerStyle(element, options) {
+    if (!options) {
+        return;
+    }
+    if (options.normalFont) {
+        element.style.fontFamily = options.normalFont;
+    }
+    if (options.forceStrokeColor) {
+        const color = typeof options.forceStrokeColor === 'string' ? options.forceStrokeColor : '#000';
+        element.style.textShadow = [
+            '-2px -2px 0 ' + color,
+            '2px -2px 0 ' + color,
+            '-2px 2px 0 ' + color,
+            '2px 2px 0 ' + color,
+            '0 0 4px ' + color
+        ].join(', ');
+    }
+}
+
 function parseTTMLPlane(ttNode) {
     const extent = getTTMLAttr(ttNode, 'extent');
     const parsed = parseTTMLLengthPair(extent, [3840, 2160]);
@@ -994,6 +1032,19 @@ function mapDisplayAlign(value) {
         case 'before':
         default:
             return 'flex-start';
+    }
+}
+
+function mapTextAlignItems(value) {
+    switch (value) {
+        case 'end':
+        case 'right':
+            return 'flex-end';
+        case 'left':
+        case 'start':
+            return 'flex-start';
+        default:
+            return 'center';
     }
 }
 

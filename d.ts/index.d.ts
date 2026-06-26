@@ -3,6 +3,11 @@ export interface B62TTMLRendererOptions {
   overlayElement?: HTMLElement
   isLive?: boolean
   maxCues?: number
+  normalFont?: string
+  fontFamily?: string
+  forceStrokeColor?: boolean | string
+  forceBackgroundColor?: string
+  backgroundPadding?: string
 }
 
 export interface B62TTMLResource {
