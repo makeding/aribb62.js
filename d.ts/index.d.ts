@@ -5,6 +5,37 @@ export interface B62TTMLRendererOptions {
   maxCues?: number
 }
 
+export interface B62TTMLResource {
+  index?: number
+  subsampleIndex?: number
+  subsampleNumber?: number
+  subsample?: number
+  id?: number
+  data?: Uint8Array | ArrayBuffer | number[]
+  payload?: Uint8Array | ArrayBuffer | number[]
+  bytes?: Uint8Array | ArrayBuffer | number[]
+  url?: string
+  mimeType?: string
+  type?: string | number
+  dataType?: number
+  format?: string
+}
+
+export interface B62TTMLPushData {
+  packetId?: number
+  mpuSequenceNumber?: number
+  pts?: number
+  rawPts?: number
+  dts?: number
+  len?: number
+  text?: string
+  data?: Uint8Array | ArrayBuffer
+  resources?: B62TTMLResource[]
+  subsamples?: B62TTMLResource[]
+  resourceMap?: Record<string, B62TTMLResource | Uint8Array | ArrayBuffer | number[]>
+  resourcesBySubsample?: Record<string, B62TTMLResource | Uint8Array | ArrayBuffer | number[]>
+}
+
 export interface B62TTMLPushResult {
   eventCount: number
   packetId?: number
@@ -16,7 +47,29 @@ export interface B62TTMLPushResult {
   effectiveBasePts: number | null
   arrivalAligned: boolean
   len: number
+  resourceCount: number
   preview: string
+}
+
+export interface B62TTMLSpanCue {
+  text: string
+  rubyText?: string
+  style: Record<string, string>
+}
+
+export interface B62TTMLBlockCue {
+  region: object | null
+  style: Record<string, string>
+  spans: B62TTMLSpanCue[]
+}
+
+export interface B62TTMLCue {
+  key: string
+  start: number
+  end: number
+  clear: boolean
+  plane: [number, number]
+  blocks: B62TTMLBlockCue[]
 }
 
 export declare class B62TTMLRenderer {
@@ -30,12 +83,12 @@ export declare class B62TTMLRenderer {
   destroy(): void
   clear(): void
   reset(): void
-  push(data: object): B62TTMLPushResult
+  push(data: B62TTMLPushData): B62TTMLPushResult
   render(): void
   readonly eventCount: number
-  static parse(text: string, basePts?: number | null, currentTime?: number, forceBaseAlignment?: boolean): object[]
-  static renderCueDOM(overlay: HTMLElement, cue: object): void
-  static previewCues(cues: object[], text?: string): string
+  static parse(text: string, basePts?: number | null, currentTime?: number, forceBaseAlignment?: boolean, options?: object): B62TTMLCue[]
+  static renderCueDOM(overlay: HTMLElement, cue: B62TTMLCue): void
+  static previewCues(cues: B62TTMLCue[], text?: string): string
 }
 
 export const TTMLRenderer: typeof B62TTMLRenderer

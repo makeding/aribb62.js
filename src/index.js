@@ -17,6 +17,9 @@ class B62TTMLRenderer {
         this._lastCueKey = null;
         this._clockId = null;
         this._eventCount = 0;
+        this._resourceScopeKey = null;
+        this._resourceUrls = {};
+        this._resourceObjectUrls = [];
         this._prepareOverlayElement();
 
         if (this._mediaElement) {
@@ -91,6 +94,7 @@ class B62TTMLRenderer {
     destroy() {
         this.detachMediaElement();
         this.clear();
+        this._clearResourceUrls();
         this._overlay = null;
     }
 
@@ -110,9 +114,10 @@ class B62TTMLRenderer {
     push(data) {
         const text = this._decodeText(data);
         this._eventCount++;
+        const resources = this._prepareResourceContext(data);
 
         if (!text) {
-            return this._buildPushResult(data, '', [], null, null, false);
+            return this._buildPushResult(data, '', [], null, null, false, resources);
         }
 
         const currentTime = this._currentTime();
@@ -129,7 +134,9 @@ class B62TTMLRenderer {
             arrivalAligned = true;
         }
 
-        const cues = parseARIBTTML(text, effectiveBasePts, currentTime, arrivalAligned);
+        const cues = parseARIBTTML(text, effectiveBasePts, currentTime, arrivalAligned, {
+            resourceResolver: resources
+        });
         if (cues.length === 0) {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
             this._addCue({
@@ -149,7 +156,7 @@ class B62TTMLRenderer {
 
         this._pruneCues(currentTime);
         this.render();
-        return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned);
+        return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources);
     }
 
     get eventCount() {
@@ -234,7 +241,7 @@ class B62TTMLRenderer {
         }
     }
 
-    _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned) {
+    _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources) {
         return {
             eventCount: this._eventCount,
             packetId: data && data.packetId,
@@ -246,6 +253,7 @@ class B62TTMLRenderer {
             effectiveBasePts: effectiveBasePts,
             arrivalAligned: arrivalAligned,
             len: (data && data.len) || (text ? text.length : 0),
+            resourceCount: resources ? resources.count : 0,
             preview: previewTTMLCues(cues, text)
         };
     }
@@ -260,6 +268,67 @@ class B62TTMLRenderer {
             this._overlay.style.fontFamily = '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic Medium", "Meiryo", sans-serif';
         }
     }
+
+    _prepareResourceContext(data) {
+        const scopeKey = data ?
+            [data.packetId, data.mpuSequenceNumber].filter((value) => value !== undefined).join(':') :
+            '';
+        if (scopeKey !== this._resourceScopeKey) {
+            this._clearResourceUrls();
+            this._resourceScopeKey = scopeKey;
+        }
+
+        normalizeB62Resources(data).forEach((resource) => {
+            const url = this._resourceToUrl(resource);
+            if (url) {
+                this._resourceUrls[String(resource.index)] = url;
+            }
+        });
+
+        return {
+            count: Object.keys(this._resourceUrls).length,
+            resolve: (url) => this._resolveResourceUrl(url)
+        };
+    }
+
+    _resourceToUrl(resource) {
+        if (!resource) {
+            return '';
+        }
+        if (resource.url) {
+            return resource.url;
+        }
+        if (!resource.data || typeof Blob === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) {
+            return '';
+        }
+
+        const blob = new Blob([resource.data], { type: resource.mimeType || '' });
+        const url = URL.createObjectURL(blob);
+        this._resourceObjectUrls.push(url);
+        return url;
+    }
+
+    _resolveResourceUrl(url) {
+        if (!url) {
+            return '';
+        }
+        const normalized = normalizeResourceReference(url);
+        const match = normalized.match(/^subt:\/\/(\d+)$/);
+        if (!match) {
+            return normalized;
+        }
+        return this._resourceUrls[match[1]] || '';
+    }
+
+    _clearResourceUrls() {
+        if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+            this._resourceObjectUrls.forEach((url) => {
+                URL.revokeObjectURL(url);
+            });
+        }
+        this._resourceObjectUrls = [];
+        this._resourceUrls = {};
+    }
 }
 
 function renderTTMLCueDOM(overlay, cue) {
@@ -273,10 +342,15 @@ function renderTTMLCueDOM(overlay, cue) {
     const marginX = (overlayWidth - contentWidth) / 2;
     const marginY = (overlayHeight - contentHeight) / 2;
 
+    if (cue.fontFaces && cue.fontFaces.length > 0) {
+        overlay.appendChild(createFontFaceStyleElement(cue.fontFaces));
+    }
+
     cue.blocks.forEach((block) => {
         const region = block.region || {};
         const origin = region.origin || [planeWidth * 0.1, planeHeight * 0.78];
         const extent = region.extent || [planeWidth * 0.8, planeHeight * 0.16];
+        const writingMode = mapWritingMode(block.style.writingMode);
         const blockElement = document.createElement('div');
         blockElement.className = 'ttml-subtitle-block';
         blockElement.style.position = 'absolute';
@@ -294,24 +368,59 @@ function renderTTMLCueDOM(overlay, cue) {
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.textAlign = block.style.textAlign || 'center';
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
+        if (block.style.backgroundImageUrl) {
+            blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
+            blockElement.style.backgroundRepeat = 'no-repeat';
+            blockElement.style.backgroundSize = 'contain';
+            blockElement.style.backgroundPosition = 'center';
+        }
+        if (writingMode.writingMode) {
+            blockElement.style.writingMode = writingMode.writingMode;
+        }
+        if (writingMode.direction) {
+            blockElement.style.direction = writingMode.direction;
+        }
+        if (block.style.direction) {
+            blockElement.style.direction = block.style.direction;
+        }
 
         const line = document.createElement('div');
         line.className = 'ttml-subtitle-line';
         line.style.boxSizing = 'border-box';
         line.style.width = '100%';
+        line.style.tabSize = '1em';
         applyTTMLStyle(line, block.style, scale);
         block.spans.forEach((span) => {
-            const spanElement = document.createElement('span');
-            spanElement.textContent = span.text;
-            applyTTMLStyle(spanElement, span.style, scale);
-            line.appendChild(spanElement);
+            line.appendChild(renderTTMLSpanDOM(span, scale));
         });
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
     });
 }
 
-function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment) {
+function renderTTMLSpanDOM(span, scale) {
+    if (span.rubyText) {
+        const rubyElement = document.createElement('ruby');
+        const baseElement = document.createElement('span');
+        const rubyTextElement = document.createElement('rt');
+        baseElement.textContent = span.text;
+        rubyTextElement.textContent = span.rubyText;
+        rubyTextElement.style.fontSize = '50%';
+        rubyTextElement.style.lineHeight = '1';
+        applyTTMLStyle(rubyElement, span.style, scale);
+        rubyElement.appendChild(baseElement);
+        rubyElement.appendChild(rubyTextElement);
+        return rubyElement;
+    }
+
+    const spanElement = document.createElement('span');
+    spanElement.textContent = span.text;
+    applyTTMLStyle(spanElement, span.style, scale);
+    return spanElement;
+}
+
+function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) {
+    options = options || {};
     const doc = new DOMParser().parseFromString(text, 'application/xml');
     if (doc.getElementsByTagName('parsererror').length > 0 || !doc.documentElement || localName(doc.documentElement) !== 'tt') {
         return [];
@@ -325,6 +434,8 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment) {
     const plane = parseTTMLPlane(tt);
     const styles = collectTTMLStyles(doc);
     const regions = collectTTMLRegions(doc, styles, plane);
+    const embeddedImages = collectTTMLEmbeddedImages(doc);
+    const fontFaces = collectTTMLFontFaces(doc, options.resourceResolver);
     const body = firstChildByLocalName(tt, 'body');
     const pNodes = descendantsByLocalName(body, 'p');
     const rawCues = [];
@@ -342,9 +453,10 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment) {
 
         const regionId = nearestTTMLAttr(pNode, 'region');
         const region = regions[regionId] || null;
-        const blockStyle = collectInheritedTTMLStyle(pNode, styles);
+        const blockStyle = Object.assign({}, region && region.style ? region.style : {}, collectInheritedTTMLStyle(pNode, styles));
+        applyTTMLResourceStyle(blockStyle, embeddedImages, options.resourceResolver);
         const spans = parseTTMLSpans(pNode, styles, blockStyle);
-        if (spans.length === 0) {
+        if (spans.length === 0 && !blockStyle.backgroundImageUrl) {
             return;
         }
 
@@ -390,6 +502,7 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment) {
             end: end,
             clear: false,
             plane: plane,
+            fontFaces: fontFaces,
             blocks: [raw.block]
         };
     });
@@ -397,29 +510,89 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment) {
 
 function parseTTMLSpans(pNode, styles, inheritedStyle) {
     const spans = [];
-    const spanNodes = childElementsByLocalName(pNode, 'span');
-    if (spanNodes.length === 0) {
-        const text = normalizeTTMLText(pNode.textContent || '');
-        if (text !== '') {
-            spans.push({
-                text: text,
-                style: Object.assign({}, inheritedStyle)
-            });
-        }
-        return spans;
+    appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans);
+    return resolveTTMLRubySpans(spans);
+}
+
+function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {
+    if (!parentNode || !parentNode.childNodes) {
+        return;
     }
 
-    spanNodes.forEach((spanNode) => {
-        const text = normalizeTTMLText(spanNode.textContent || '');
-        if (text === '') {
-            return;
+    for (let i = 0; i < parentNode.childNodes.length; i++) {
+        const child = parentNode.childNodes[i];
+        if (child.nodeType === Node.TEXT_NODE || child.nodeType === Node.CDATA_SECTION_NODE) {
+            const text = normalizeTTMLText(child.nodeValue || '');
+            if (text !== '') {
+                spans.push({
+                    text: text,
+                    style: Object.assign({}, inheritedStyle)
+                });
+            }
+            continue;
         }
-        spans.push({
-            text: text,
-            style: mergeTTMLStyleRefs(spanNode, styles, inheritedStyle)
-        });
+        if (child.nodeType !== Node.ELEMENT_NODE) {
+            continue;
+        }
+
+        const name = localName(child);
+        if (name === 'br') {
+            spans.push({
+                text: '\n',
+                style: Object.assign({}, inheritedStyle)
+            });
+            continue;
+        }
+        if (name !== 'span') {
+            appendTTMLInlineSpans(child, styles, inheritedStyle, spans);
+            continue;
+        }
+
+        const style = mergeTTMLStyleRefs(child, styles, inheritedStyle);
+        const beforeLength = spans.length;
+        appendTTMLInlineSpans(child, styles, style, spans);
+        if (spans.length === beforeLength) {
+            const text = normalizeTTMLText(child.textContent || '');
+            if (text !== '') {
+                spans.push({
+                    text: text,
+                    style: style
+                });
+            }
+        }
+
+        const id = getXMLId(child);
+        const rubyTargetId = getARIBTTMLAttr(child, 'ruby');
+        for (let j = beforeLength; j < spans.length; j++) {
+            if (id && !spans[j].id) {
+                spans[j].id = id;
+            }
+            if (rubyTargetId && !spans[j].rubyTargetId) {
+                spans[j].rubyTargetId = rubyTargetId;
+            }
+        }
+    }
+}
+
+function resolveTTMLRubySpans(spans) {
+    const byId = {};
+    spans.forEach((span) => {
+        if (span.id && !span.rubyTargetId && !byId[span.id]) {
+            byId[span.id] = span;
+        }
     });
-    return spans;
+
+    return spans.filter((span) => {
+        if (!span.rubyTargetId) {
+            return true;
+        }
+        const base = byId[span.rubyTargetId];
+        if (!base) {
+            return true;
+        }
+        base.rubyText = span.text;
+        return false;
+    });
 }
 
 function collectTTMLStyles(doc) {
@@ -445,7 +618,8 @@ function collectTTMLRegions(doc, styles, plane) {
         regions[id] = {
             origin: parseTTMLLengthPair(getTTMLAttr(regionNode, 'origin'), plane),
             extent: parseTTMLLengthPair(getTTMLAttr(regionNode, 'extent'), plane),
-            displayAlign: getTTMLAttr(regionNode, 'displayAlign') || style.displayAlign || 'before'
+            displayAlign: getTTMLAttr(regionNode, 'displayAlign') || style.displayAlign || 'before',
+            style: style
         };
     });
     return regions;
@@ -478,7 +652,22 @@ function mergeTTMLStyleRefs(node, styles, base) {
         }
     });
 
-    const attrs = ['fontSize', 'lineHeight', 'fontWeight', 'fontStyle', 'color', 'backgroundColor', 'displayAlign', 'textAlign'];
+    const attrs = [
+        'fontSize',
+        'lineHeight',
+        'fontWeight',
+        'fontStyle',
+        'fontFamily',
+        'color',
+        'backgroundColor',
+        'displayAlign',
+        'textAlign',
+        'textDecoration',
+        'textShadow',
+        'backgroundImage',
+        'writingMode',
+        'direction'
+    ];
     attrs.forEach((name) => {
         const value = getTTMLAttr(node, name);
         if (value) {
@@ -516,6 +705,15 @@ function applyTTMLStyle(element, style, scale) {
     }
     if (style.fontStyle) {
         element.style.fontStyle = style.fontStyle;
+    }
+    if (style.fontFamily) {
+        element.style.fontFamily = mapARIBFontFamily(style.fontFamily);
+    }
+    if (style.textDecoration) {
+        element.style.textDecoration = style.textDecoration;
+    }
+    if (style.textShadow) {
+        element.style.textShadow = style.textShadow;
     }
 }
 
@@ -623,6 +821,283 @@ function mapDisplayAlign(value) {
     }
 }
 
+function mapWritingMode(value) {
+    switch (value) {
+        case 'lrtb':
+        case 'horizontal-tb':
+            return { writingMode: 'horizontal-tb', direction: 'ltr' };
+        case 'rltb':
+            return { writingMode: 'horizontal-tb', direction: 'rtl' };
+        case 'tblr':
+        case 'vertical-lr':
+            return { writingMode: 'vertical-lr', direction: '' };
+        case 'tbrl':
+        case 'vertical-rl':
+            return { writingMode: 'vertical-rl', direction: '' };
+        default:
+            return { writingMode: '', direction: '' };
+    }
+}
+
+function mapARIBFontFamily(value) {
+    const text = String(value || '').trim();
+    const normalized = text.replace(/^['"]|['"]$/g, '');
+    switch (normalized) {
+        case '丸ゴシック':
+            return '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic", "Meiryo", sans-serif';
+        case '太丸ゴシック':
+            return '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic", "Meiryo", sans-serif';
+        case '角ゴシック':
+            return '"Yu Gothic", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif';
+        default:
+            return text;
+    }
+}
+
+function createFontFaceStyleElement(fontFaces) {
+    const styleElement = document.createElement('style');
+    styleElement.textContent = fontFaces.map((fontFace) => {
+        const parts = [
+            'font-family: "' + cssEscapeString(fontFace.family) + '"',
+            'src: url("' + cssEscapeUrl(fontFace.url) + '")' + (fontFace.format ? ' format("' + cssEscapeString(fontFace.format) + '")' : '')
+        ];
+        if (fontFace.unicodeRange) {
+            parts.push('unicode-range: ' + fontFace.unicodeRange);
+        }
+        return '@font-face { ' + parts.join('; ') + '; }';
+    }).join('\n');
+    return styleElement;
+}
+
+function collectTTMLEmbeddedImages(doc) {
+    const images = {};
+    descendantsByLocalName(doc.documentElement, 'image').forEach((imageNode) => {
+        const id = getXMLId(imageNode);
+        if (!id) {
+            return;
+        }
+        const encoding = (getTTMLAttr(imageNode, 'encoding') || '').toLowerCase();
+        const imageType = (getTTMLAttr(imageNode, 'imageType') || 'png').toLowerCase();
+        const payload = String(imageNode.textContent || '').replace(/\s+/g, '');
+        if (!payload) {
+            return;
+        }
+        if (encoding === 'base64' || encoding === '') {
+            images[id] = 'data:' + imageTypeToMime(imageType) + ';base64,' + payload;
+        }
+    });
+    return images;
+}
+
+function collectTTMLFontFaces(doc, resourceResolver) {
+    const fontFaces = [];
+    descendantsByLocalName(doc.documentElement, 'font-face').forEach((fontFaceNode) => {
+        const family = getTTMLAttr(fontFaceNode, 'font-family') || getTTMLAttr(fontFaceNode, 'fontFamily');
+        if (!family) {
+            return;
+        }
+        const sourceNodes = childElementsByLocalName(fontFaceNode, 'src');
+        sourceNodes.forEach((sourceNode) => {
+            const url = getTTMLAttr(sourceNode, 'url');
+            const resolvedUrl = resolveTTMLResourceReference(url, {}, resourceResolver);
+            if (!resolvedUrl) {
+                return;
+            }
+            fontFaces.push({
+                family: stripQuotes(family),
+                url: resolvedUrl,
+                format: getTTMLAttr(sourceNode, 'format'),
+                unicodeRange: getTTMLAttr(fontFaceNode, 'unicode-range') || getTTMLAttr(fontFaceNode, 'unicodeRange')
+            });
+        });
+    });
+    return fontFaces;
+}
+
+function applyTTMLResourceStyle(style, embeddedImages, resourceResolver) {
+    if (!style || !style.backgroundImage) {
+        return;
+    }
+    const resolvedUrl = resolveTTMLResourceReference(style.backgroundImage, embeddedImages, resourceResolver);
+    if (resolvedUrl) {
+        style.backgroundImageUrl = resolvedUrl;
+    }
+}
+
+function resolveTTMLResourceReference(value, embeddedImages, resourceResolver) {
+    const normalized = normalizeResourceReference(value);
+    if (!normalized) {
+        return '';
+    }
+    if (normalized.charAt(0) === '#') {
+        return embeddedImages[normalized.slice(1)] || '';
+    }
+    if (resourceResolver && resourceResolver.resolve) {
+        return resourceResolver.resolve(normalized);
+    }
+    return normalized;
+}
+
+function normalizeB62Resources(data) {
+    const resources = [];
+    if (!data) {
+        return resources;
+    }
+
+    appendB62ResourceList(resources, data.resources);
+    appendB62ResourceList(resources, data.subsamples);
+    appendB62ResourceMap(resources, data.resourceMap);
+    appendB62ResourceMap(resources, data.resourcesBySubsample);
+    return resources;
+}
+
+function appendB62ResourceList(resources, list) {
+    if (!Array.isArray(list)) {
+        return;
+    }
+    list.forEach((item) => {
+        const resource = normalizeB62Resource(item);
+        if (resource) {
+            resources.push(resource);
+        }
+    });
+}
+
+function appendB62ResourceMap(resources, map) {
+    if (!map || typeof map !== 'object') {
+        return;
+    }
+    Object.keys(map).forEach((key) => {
+        const value = map[key];
+        const resource = normalizeB62Resource(typeof value === 'object' && !(value instanceof Uint8Array) && !(value instanceof ArrayBuffer) ?
+            Object.assign({ index: Number(key) }, value) :
+            { index: Number(key), data: value });
+        if (resource) {
+            resources.push(resource);
+        }
+    });
+}
+
+function normalizeB62Resource(item) {
+    if (!item) {
+        return null;
+    }
+    const index = firstFiniteNumber(
+        item.index,
+        item.subsampleIndex,
+        item.subsampleNumber,
+        item.subsample,
+        item.id
+    );
+    if (!Number.isFinite(index)) {
+        return null;
+    }
+
+    return {
+        index: index,
+        data: toUint8Array(item.data || item.payload || item.bytes),
+        url: item.url || '',
+        mimeType: item.mimeType || stringMimeType(item.type) || mimeFromB62Resource(item)
+    };
+}
+
+function mimeFromB62Resource(resource) {
+    if (resource.mimeType) {
+        return resource.mimeType;
+    }
+    if (resource.format) {
+        return formatToMime(resource.format);
+    }
+    const dataType = Number.isFinite(Number(resource.dataType)) ? Number(resource.dataType) : Number(resource.type);
+    switch (dataType) {
+        case 1:
+            return 'image/png';
+        case 2:
+            return 'image/svg+xml';
+        case 6:
+            return 'image/svg+xml';
+        case 7:
+            return 'font/woff';
+        default:
+            return '';
+    }
+}
+
+function stringMimeType(value) {
+    return typeof value === 'string' && value.indexOf('/') >= 0 ? value : '';
+}
+
+function toUint8Array(data) {
+    if (!data) {
+        return null;
+    }
+    if (data instanceof Uint8Array) {
+        return data;
+    }
+    if (data instanceof ArrayBuffer) {
+        return new Uint8Array(data);
+    }
+    if (Array.isArray(data)) {
+        return new Uint8Array(data);
+    }
+    return null;
+}
+
+function firstFiniteNumber() {
+    for (let i = 0; i < arguments.length; i++) {
+        const value = Number(arguments[i]);
+        if (Number.isFinite(value)) {
+            return value;
+        }
+    }
+    return NaN;
+}
+
+function normalizeResourceReference(value) {
+    let text = String(value || '').trim().replace(/\uFF03/g, '#');
+    const url = text.match(/^url\((.*)\)$/);
+    if (url) {
+        text = url[1].trim();
+    }
+    return stripQuotes(text);
+}
+
+function imageTypeToMime(type) {
+    switch (String(type || '').toLowerCase()) {
+        case 'svg':
+        case 'svg+xml':
+            return 'image/svg+xml';
+        case 'png':
+        default:
+            return 'image/png';
+    }
+}
+
+function formatToMime(format) {
+    switch (String(format || '').toLowerCase()) {
+        case 'png':
+            return 'image/png';
+        case 'svg':
+            return 'image/svg+xml';
+        case 'woff':
+            return 'font/woff';
+        default:
+            return '';
+    }
+}
+
+function stripQuotes(value) {
+    return String(value || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
+function cssEscapeUrl(value) {
+    return String(value || '').replace(/["\\\n\r]/g, '\\$&');
+}
+
+function cssEscapeString(value) {
+    return String(value || '').replace(/["\\\n\r]/g, '\\$&');
+}
+
 function previewTTMLCues(cues, text) {
     const parts = [];
     cues.forEach((cue) => {
@@ -685,6 +1160,23 @@ function getTTMLAttr(node, local) {
     return '';
 }
 
+function getARIBTTMLAttr(node, local) {
+    if (!node || !node.attributes) {
+        return '';
+    }
+    const direct = node.getAttribute('arib-tt:' + local);
+    if (direct) {
+        return direct;
+    }
+    for (let i = 0; i < node.attributes.length; i++) {
+        const attr = node.attributes[i];
+        if (attr.localName === local && /arib-ttml/.test(attr.namespaceURI || '')) {
+            return attr.value;
+        }
+    }
+    return '';
+}
+
 function localName(node) {
     return node.localName || node.nodeName.replace(/^.*:/, '');
 }
@@ -723,7 +1215,11 @@ function descendantsByLocalName(node, name) {
 }
 
 function normalizeTTMLText(text) {
-    return String(text || '').replace(/\s+/g, ' ').trim();
+    return String(text || '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[ \f\v]+/g, ' ')
+        .replace(/[ \t]*\n[ \t]*/g, '\n')
+        .trim();
 }
 
 function formatNumber(value, digits) {
