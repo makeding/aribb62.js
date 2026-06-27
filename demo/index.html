@@ -107,6 +107,7 @@
       <button id="loadBasic">Basic</button>
       <button id="loadVertical">Vertical</button>
       <button id="loadAudio">Audio metadata</button>
+      <button id="loadSvgFont">SVG font</button>
       <button id="restart">Restart</button>
       <button id="playPause">Pause</button>
       <span class="time" id="timeLabel">0.00 / 12.00</span>
@@ -125,6 +126,28 @@
     const status = document.getElementById('status');
     const timeLabel = document.getElementById('timeLabel');
     const playPause = document.getElementById('playPause');
+    const svgFontText = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1">
+<defs>
+<font id="rgothic" horiz-adv-x="360">
+  <font-face
+    font-family="丸ゴシック"
+    font-weight="400"
+    font-stretch="normal"
+    units-per-em="360"
+    panose-1="0 0 0 0 0 0 0 0 0 0"
+    ascent="360"
+    descent="0"
+    bbox="0 0 360 360"
+    underline-thickness="1"
+    underline-position="0"
+    unicode-range="U+E11A">
+    <font-face-src><font-face-name name="丸ゴシック" /></font-face-src></font-face>
+<missing-glyph d="M1 1z" />
+<glyph glyph-name="uniE11A" unicode="&#xE11A;" horiz-adv-x="360" d="M180 290 l0 -50 -80 0 -80 0 0 -50 0 -50 80 0 80 0 0 -50 c0 -27 2 -50 5 -50 3 0 39 34 80 75 l75 75 -75 75 c-41 41 -77 75 -80 75 -3 0 -5 -22 -5 -50z" />
+</font>
+</defs>
+</svg>`;
 
     const samples = {
       basic: `<?xml version="1.0" encoding="UTF-8"?>
@@ -201,7 +224,32 @@
       <p region="bottom" style="base">内蔵音 metadata: romsound://2</p>
     </div>
     <div begin="00:00:06.000" end="00:00:08.000">
-      <arib-tt:audio src="subt://1" loop="true"/>
+      <arib-tt:audio src="subt://2" loop="true"/>
+    </div>
+  </body>
+</tt>`,
+      svgFont: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-ttml/v1_0"
+    ttp:extent="3840px 2160px" xml:lang="ja">
+  <head>
+    <styling>
+      <arib-tt:font-face font-family="丸ゴシック" unicode-range="U+E11A">
+        <arib-tt:src url="subt://1" format="svg"/>
+      </arib-tt:font-face>
+      <style xml:id="base" tts:fontFamily="丸ゴシック" tts:fontSize="128px" tts:lineHeight="160px"
+             tts:color="white" tts:textAlign="center" tts:backgroundColor="#00000080"
+             arib-tt:text-shadow="5px 5px 2px black"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:origin="560px 820px" tts:extent="2720px 360px" tts:displayAlign="center"/>
+    </layout>
+  </head>
+  <body>
+    <div>
+      <p begin="00:00:00.000" end="00:00:12.000" region="bottom" style="base">やさしいお味で\uE11A</p>
     </div>
   </body>
 </tt>`
@@ -231,7 +279,8 @@
         pts: 0,
         text: input.value,
         resources: [
-          { index: 1, url: 'data:audio/mpeg;base64,' }
+          { index: 1, data: new TextEncoder().encode(svgFontText), mimeType: 'image/svg+xml' },
+          { index: 2, url: 'data:audio/mpeg;base64,' }
         ]
       });
       renderer.render();
@@ -267,7 +316,9 @@
         'events=' + lastResult.eventCount,
         'cues=' + lastResult.cueCount,
         'audios=' + lastResult.audioCount,
+        'fonts=' + lastResult.fontFaceCount,
         'preview=' + lastResult.preview,
+        'codepoints=' + lastResult.previewCodePoints,
         lastResult.audios.map((audio) => 'audio src=' + audio.src + ' resolved=' + audio.resolvedSrc + ' loop=' + audio.loop).join('\\n')
       ].filter(Boolean).join('\\n');
     }
@@ -275,6 +326,7 @@
     document.getElementById('loadBasic').addEventListener('click', () => setSample('basic'));
     document.getElementById('loadVertical').addEventListener('click', () => setSample('vertical'));
     document.getElementById('loadAudio').addEventListener('click', () => setSample('audio'));
+    document.getElementById('loadSvgFont').addEventListener('click', () => setSample('svgFont'));
     document.getElementById('renderInput').addEventListener('click', pushCurrentText);
     document.getElementById('restart').addEventListener('click', () => {
       media.currentTime = 0;

@@ -54,6 +54,7 @@ export interface B62TTMLPushResult {
   basePts: number | null
   effectiveBasePts: number | null
   arrivalAligned: boolean
+  timelineOffset: number | null
   len: number
   resourceCount: number
   preview: string
@@ -65,6 +66,8 @@ export interface B62TTMLPushResult {
 export interface B62TTMLFontFace {
   family: string
   url: string
+  src: string
+  resourceIndex: number | null
   format: string
   unicodeRange: string
   downloadName: string

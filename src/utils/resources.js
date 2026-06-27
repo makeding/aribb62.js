@@ -40,15 +40,21 @@ export function collectTTMLFontFaces(doc, resourceResolver) {
         const sourceNodes = childElementsByLocalName(fontFaceNode, 'src');
         sourceNodes.forEach((sourceNode) => {
             const url = getTTMLAttr(sourceNode, 'url');
+            const src = normalizeResourceReference(url);
             const resolvedUrl = resolveTTMLResourceReference(url, {}, resourceResolver);
             if (!resolvedUrl) {
                 return;
             }
+            const format = getTTMLAttr(sourceNode, 'format');
+            const resource = resourceResolver && resourceResolver.resource ? resourceResolver.resource(src) : null;
             fontFaces.push({
                 family: stripQuotes(family),
+                src: src,
+                resourceIndex: resourceIndexFromSubtUrl(src),
                 url: resolvedUrl,
-                format: getTTMLAttr(sourceNode, 'format'),
-                unicodeRange: getTTMLAttr(fontFaceNode, 'unicode-range') || getTTMLAttr(fontFaceNode, 'unicodeRange')
+                format: format,
+                unicodeRange: getTTMLAttr(fontFaceNode, 'unicode-range') || getTTMLAttr(fontFaceNode, 'unicodeRange'),
+                svgGlyphs: collectSVGFontGlyphs(resource, format)
             });
         });
     });
@@ -278,6 +284,74 @@ export function normalizeResourceReference(value) {
         text = url[1].trim();
     }
     return stripQuotes(text);
+}
+
+function resourceIndexFromSubtUrl(value) {
+    const match = String(value || '').match(/^subt:\/\/(\d+)$/);
+    return match ? Number(match[1]) : null;
+}
+
+function collectSVGFontGlyphs(resource, format) {
+    if (!resource || !resource.data) {
+        return null;
+    }
+    const mimeType = String(resource.mimeType || '').toLowerCase();
+    const normalizedFormat = String(format || '').toLowerCase();
+    if (normalizedFormat !== 'svg' && mimeType !== 'image/svg+xml') {
+        return null;
+    }
+    if (typeof TextDecoder === 'undefined' || typeof DOMParser === 'undefined') {
+        return null;
+    }
+
+    try {
+        const text = new TextDecoder('utf-8').decode(resource.data);
+        const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+        if (!doc.documentElement || doc.getElementsByTagName('parsererror').length > 0) {
+            return null;
+        }
+        const fontNode = descendantsByLocalName(doc.documentElement, 'font')[0];
+        if (!fontNode) {
+            return null;
+        }
+        const fontFaceNode = descendantsByLocalName(fontNode, 'font-face')[0];
+        const unitsPerEm = parseNumericAttr(fontFaceNode, 'units-per-em', 360);
+        const ascent = parseNumericAttr(fontFaceNode, 'ascent', unitsPerEm);
+        const descent = parseNumericAttr(fontFaceNode, 'descent', 0);
+        const fontAdvance = parseNumericAttr(fontNode, 'horiz-adv-x', unitsPerEm);
+        const glyphs = {};
+
+        descendantsByLocalName(fontNode, 'glyph').forEach((glyphNode) => {
+            const unicode = glyphNode.getAttribute('unicode');
+            const path = glyphNode.getAttribute('d');
+            if (!unicode || !path) {
+                return;
+            }
+            const char = Array.from(unicode)[0];
+            if (!char) {
+                return;
+            }
+            glyphs[char.codePointAt(0)] = {
+                path: path,
+                horizAdvX: parseNumericAttr(glyphNode, 'horiz-adv-x', fontAdvance),
+                unitsPerEm: unitsPerEm,
+                ascent: ascent,
+                descent: descent
+            };
+        });
+
+        return Object.keys(glyphs).length > 0 ? glyphs : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function parseNumericAttr(node, name, fallback) {
+    if (!node) {
+        return fallback;
+    }
+    const value = Number(node.getAttribute(name));
+    return Number.isFinite(value) ? value : fallback;
 }
 
 export function imageTypeToMime(type) {

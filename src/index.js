@@ -79,7 +79,9 @@ class B62TTMLRenderer {
         this._eventCount = 0;
         this._resourceScopeKey = null;
         this._resourceUrls = {};
+        this._resourceMap = {};
         this._resourceObjectUrls = [];
+        this._timelineOffsets = {};
         this._prepareOverlayElement();
 
         if (this._mediaElement) {
@@ -158,6 +160,7 @@ class B62TTMLRenderer {
         this.detachMediaElement();
         this._cancelLayoutRender();
         this.clear();
+        this._timelineOffsets = {};
         this._clearResourceUrls();
         this._overlay = null;
     }
@@ -174,6 +177,7 @@ class B62TTMLRenderer {
     reset() {
         this.clear();
         this._eventCount = 0;
+        this._timelineOffsets = {};
     }
 
     push(data) {
@@ -189,9 +193,11 @@ class B62TTMLRenderer {
         const basePts = this._basePts(data);
         const effectiveBasePts = basePts;
         const arrivalAligned = false;
+        const timelineOffset = this._resolveTimelineOffset(data, text, effectiveBasePts);
 
         const cues = parseARIBTTML(text, effectiveBasePts, currentTime, arrivalAligned, {
-            resourceResolver: resources
+            resourceResolver: resources,
+            timelineOffset: timelineOffset
         });
         if (cues.length === 0) {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
@@ -212,7 +218,7 @@ class B62TTMLRenderer {
 
         this._pruneCues(currentTime);
         this.render();
-        return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources);
+        return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset);
     }
 
     get eventCount() {
@@ -280,6 +286,26 @@ class B62TTMLRenderer {
         return null;
     }
 
+    _resolveTimelineOffset(data, text, basePts) {
+        const minStart = findTTMLMinStart(text);
+        if (minStart === null) {
+            return null;
+        }
+
+        const key = this._timelineOffsetKey(data);
+        if (!Number.isFinite(this._timelineOffsets[key])) {
+            this._timelineOffsets[key] = (basePts !== null ? basePts : 0) - minStart;
+        }
+        return this._timelineOffsets[key];
+    }
+
+    _timelineOffsetKey(data) {
+        if (data && data.packetId !== undefined) {
+            return 'packet:' + data.packetId;
+        }
+        return 'default';
+    }
+
     _currentTime() {
         return this._mediaElement ? (this._mediaElement.currentTime || 0) : 0;
     }
@@ -299,7 +325,7 @@ class B62TTMLRenderer {
         }
     }
 
-    _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources) {
+    _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset) {
         const audios = [];
         cues.forEach((cue) => {
             if (cue.audios && cue.audios.length > 0) {
@@ -320,6 +346,7 @@ class B62TTMLRenderer {
             basePts: basePts,
             effectiveBasePts: effectiveBasePts,
             arrivalAligned: arrivalAligned,
+            timelineOffset: timelineOffset,
             len: (data && data.len) || (text ? text.length : 0),
             resourceCount: resources ? resources.count : 0,
             preview: preview,
@@ -351,7 +378,9 @@ class B62TTMLRenderer {
         if (typeof ResizeObserver !== 'undefined') {
             this._resizeObserver = new ResizeObserver(this._boundLayoutChange);
             this._resizeObserver.observe(this._overlay);
-            this._resizeObserver.observe(this._mediaElement);
+            if (isElementNode(this._mediaElement)) {
+                this._resizeObserver.observe(this._mediaElement);
+            }
         } else {
             window.addEventListener('resize', this._boundLayoutChange);
             this._windowResizeAttached = true;
@@ -425,11 +454,13 @@ class B62TTMLRenderer {
             if (url) {
                 this._resourceUrls[String(resource.index)] = url;
             }
+            this._resourceMap[String(resource.index)] = resource;
         });
 
         return {
             count: Object.keys(this._resourceUrls).length,
-            resolve: (url) => this._resolveResourceUrl(url)
+            resolve: (url) => this._resolveResourceUrl(url),
+            resource: (url) => this._resolveResource(url)
         };
     }
 
@@ -462,6 +493,18 @@ class B62TTMLRenderer {
         return this._resourceUrls[match[1]] || '';
     }
 
+    _resolveResource(url) {
+        if (!url) {
+            return null;
+        }
+        const normalized = normalizeResourceReference(url);
+        const match = normalized.match(/^subt:\/\/(\d+)$/);
+        if (!match) {
+            return null;
+        }
+        return this._resourceMap[match[1]] || null;
+    }
+
     _clearResourceUrls() {
         if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
             this._resourceObjectUrls.forEach((url) => {
@@ -470,6 +513,7 @@ class B62TTMLRenderer {
         }
         this._resourceObjectUrls = [];
         this._resourceUrls = {};
+        this._resourceMap = {};
     }
 }
 
@@ -591,29 +635,65 @@ function getMediaContentViewport(overlay, mediaElement) {
     };
 }
 
+function isElementNode(value) {
+    return typeof Element !== 'undefined' && value instanceof Element;
+}
+
 function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
     if (span.rubyText) {
         const rubyElement = document.createElement('ruby');
         const baseElement = document.createElement('span');
         const rubyTextElement = document.createElement('rt');
-        baseElement.textContent = span.text;
-        rubyTextElement.textContent = span.rubyText;
         rubyTextElement.style.fontSize = '50%';
         rubyTextElement.style.lineHeight = '1';
         applyTTMLStyle(rubyElement, span.style, scale);
         applyViewerStyle(rubyElement, styleOptions);
         applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
+        appendTTMLTextWithSVGGlyphs(baseElement, span.text, fontFaces);
+        appendTTMLTextWithSVGGlyphs(rubyTextElement, span.rubyText, fontFaces);
         rubyElement.appendChild(baseElement);
         rubyElement.appendChild(rubyTextElement);
         return rubyElement;
     }
 
     const spanElement = document.createElement('span');
-    spanElement.textContent = span.text;
     applyTTMLStyle(spanElement, span.style, scale);
     applyViewerStyle(spanElement, styleOptions);
     applyFontFaceStack(spanElement, fontFaces, span.text);
+    appendTTMLTextWithSVGGlyphs(spanElement, span.text, fontFaces);
     return spanElement;
+}
+
+function findTTMLMinStart(text) {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length > 0 || !doc.documentElement || localName(doc.documentElement) !== 'tt') {
+        return null;
+    }
+
+    const body = firstChildByLocalName(doc.documentElement, 'body');
+    if (!body) {
+        return null;
+    }
+
+    let minStart = null;
+    const collectStart = (node) => {
+        const timingNode = nearestTimedNode(node);
+        let start = parseTTMLTime(getTTMLAttr(node, 'begin'));
+        if (start === null && timingNode) {
+            start = parseTTMLTime(getTTMLAttr(timingNode, 'begin'));
+        }
+        if (start !== null && (minStart === null || start < minStart)) {
+            minStart = start;
+        }
+    };
+
+    descendantsByLocalName(body, 'p').forEach(collectStart);
+    descendantsByLocalName(body, 'audio').forEach((audioNode) => {
+        if (!hasAncestorByLocalName(audioNode, 'p')) {
+            collectStart(audioNode);
+        }
+    });
+    return minStart;
 }
 
 function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) {
@@ -717,7 +797,9 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
     });
 
     let startOffset = 0;
-    if (minStart !== null && basePts !== null && (forceBaseAlignment || Math.abs(minStart - basePts) > 0.05)) {
+    if (Number.isFinite(options.timelineOffset)) {
+        startOffset = options.timelineOffset;
+    } else if (minStart !== null && basePts !== null && (forceBaseAlignment || Math.abs(minStart - basePts) > 0.05)) {
         startOffset = basePts - minStart;
     }
 
@@ -1019,6 +1101,64 @@ function applyFontFaceStack(element, fontFaces, text) {
         fontFaceStack;
 }
 
+function appendTTMLTextWithSVGGlyphs(element, text, fontFaces) {
+    const chars = Array.from(String(text || ''));
+    let textBuffer = '';
+    chars.forEach((char) => {
+        const glyph = findSVGGlyph(fontFaces, char);
+        if (!glyph) {
+            textBuffer += char;
+            return;
+        }
+        if (textBuffer) {
+            element.appendChild(document.createTextNode(textBuffer));
+            textBuffer = '';
+        }
+        element.appendChild(createSVGGlyphElement(glyph));
+    });
+    if (textBuffer) {
+        element.appendChild(document.createTextNode(textBuffer));
+    }
+}
+
+function findSVGGlyph(fontFaces, char) {
+    if (!fontFaces || !char) {
+        return null;
+    }
+    const codePoint = char.codePointAt(0);
+    for (let i = 0; i < fontFaces.length; i++) {
+        const fontFace = fontFaces[i];
+        if (fontFace && fontFace.svgGlyphs && fontFace.svgGlyphs[codePoint]) {
+            return fontFace.svgGlyphs[codePoint];
+        }
+    }
+    return null;
+}
+
+function createSVGGlyphElement(glyph) {
+    const namespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(namespace, 'svg');
+    const path = document.createElementNS(namespace, 'path');
+    const unitsPerEm = glyph.unitsPerEm || 360;
+    const advance = glyph.horizAdvX || unitsPerEm;
+    const ascent = glyph.ascent || unitsPerEm;
+    const descent = glyph.descent || 0;
+    const height = ascent + Math.abs(descent);
+
+    svg.setAttribute('viewBox', '0 0 ' + advance + ' ' + height);
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.display = 'inline-block';
+    svg.style.width = (advance / unitsPerEm) + 'em';
+    svg.style.height = '1em';
+    svg.style.verticalAlign = '-0.08em';
+    svg.style.overflow = 'visible';
+    path.setAttribute('d', glyph.path);
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('transform', 'translate(0 ' + ascent + ') scale(1 -1)');
+    svg.appendChild(path);
+    return svg;
+}
+
 function collectPushResultFontFaces(cues, eventCount) {
     const fontFaces = [];
     const seen = {};
@@ -1038,6 +1178,8 @@ function collectPushResultFontFaces(cues, eventCount) {
             fontFaces.push({
                 family: fontFace.family || '',
                 url: fontFace.url || '',
+                src: fontFace.src || '',
+                resourceIndex: Number.isFinite(fontFace.resourceIndex) ? fontFace.resourceIndex : null,
                 format: fontFace.format || '',
                 unicodeRange: fontFace.unicodeRange || '',
                 downloadName: buildFontFaceDownloadName(fontFace, eventCount, index, format)
