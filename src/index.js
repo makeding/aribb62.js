@@ -22,7 +22,11 @@ class B62TTMLRenderer {
         };
         this._cues = [];
         this._lastCueKey = null;
+        this._lastLayoutKey = null;
         this._clockId = null;
+        this._layoutRenderId = null;
+        this._resizeObserver = null;
+        this._windowResizeAttached = false;
         this._eventCount = 0;
         this._resourceScopeKey = null;
         this._resourceUrls = {};
@@ -49,11 +53,13 @@ class B62TTMLRenderer {
         mediaElement.addEventListener('resize', this._boundRender);
         mediaElement.addEventListener('play', this._boundStartClock);
         mediaElement.addEventListener('pause', this._boundStopClock);
+        this._observeLayout();
         this.startClock();
     }
 
     detachMediaElement() {
         this.stopClock();
+        this._disconnectLayoutObserver();
         if (!this._mediaElement) {
             return;
         }
@@ -69,7 +75,8 @@ class B62TTMLRenderer {
     setOverlayElement(overlayElement) {
         this._overlay = overlayElement || null;
         this._prepareOverlayElement();
-        this.render();
+        this._observeLayout();
+        this._queueLayoutRender();
     }
 
     setLive(isLive) {
@@ -100,6 +107,7 @@ class B62TTMLRenderer {
 
     destroy() {
         this.detachMediaElement();
+        this._cancelLayoutRender();
         this.clear();
         this._clearResourceUrls();
         this._overlay = null;
@@ -108,6 +116,7 @@ class B62TTMLRenderer {
     clear() {
         this._cues = [];
         this._lastCueKey = null;
+        this._lastLayoutKey = null;
         if (this._overlay) {
             this._overlay.innerHTML = '';
         }
@@ -188,10 +197,12 @@ class B62TTMLRenderer {
         }
 
         const key = cue ? cue.key : null;
-        if (key === this._lastCueKey) {
+        const layoutKey = this._layoutKey(overlay, mediaElement);
+        if (key === this._lastCueKey && layoutKey === this._lastLayoutKey) {
             return;
         }
         this._lastCueKey = key;
+        this._lastLayoutKey = layoutKey;
         overlay.innerHTML = '';
 
         if (!cue || cue.clear) {
@@ -283,6 +294,76 @@ class B62TTMLRenderer {
             this._overlay.style.fontFamily = this._styleOptions.normalFont ||
                 '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic Medium", "Meiryo", sans-serif';
         }
+    }
+
+    _observeLayout() {
+        this._disconnectLayoutObserver();
+        if (!this._overlay || !this._mediaElement || typeof window === 'undefined') {
+            return;
+        }
+
+        this._boundLayoutChange = this._boundLayoutChange || this._queueLayoutRender.bind(this);
+        if (typeof ResizeObserver !== 'undefined') {
+            this._resizeObserver = new ResizeObserver(this._boundLayoutChange);
+            this._resizeObserver.observe(this._overlay);
+            this._resizeObserver.observe(this._mediaElement);
+        } else {
+            window.addEventListener('resize', this._boundLayoutChange);
+            this._windowResizeAttached = true;
+        }
+    }
+
+    _disconnectLayoutObserver() {
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
+        if (this._windowResizeAttached && typeof window !== 'undefined' && this._boundLayoutChange) {
+            window.removeEventListener('resize', this._boundLayoutChange);
+        }
+        this._windowResizeAttached = false;
+    }
+
+    _queueLayoutRender() {
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+            if (this._layoutRenderId !== null) {
+                return;
+            }
+            this._layoutRenderId = window.requestAnimationFrame(() => {
+                this._layoutRenderId = null;
+                this._invalidateLayout();
+                this.render();
+            });
+            return;
+        }
+
+        this._invalidateLayout();
+        this.render();
+    }
+
+    _cancelLayoutRender() {
+        if (this._layoutRenderId === null || typeof window === 'undefined' || !window.cancelAnimationFrame) {
+            this._layoutRenderId = null;
+            return;
+        }
+        window.cancelAnimationFrame(this._layoutRenderId);
+        this._layoutRenderId = null;
+    }
+
+    _invalidateLayout() {
+        this._lastLayoutKey = null;
+    }
+
+    _layoutKey(overlay, mediaElement) {
+        const viewport = getMediaContentViewport(overlay, mediaElement);
+        return [
+            Math.round(viewport.left * 100),
+            Math.round(viewport.top * 100),
+            Math.round(viewport.width * 100),
+            Math.round(viewport.height * 100),
+            mediaElement.videoWidth || 0,
+            mediaElement.videoHeight || 0
+        ].join(':');
     }
 
     _prepareResourceContext(data) {

@@ -1,5 +1,5 @@
 export interface B62TTMLRendererOptions {
-  mediaElement?: HTMLMediaElement
+  mediaElement?: HTMLVideoElement
   overlayElement?: HTMLElement
   isLive?: boolean
   maxCues?: number
@@ -96,7 +96,7 @@ export interface B62TTMLCue {
 
 export declare class B62TTMLRenderer {
   constructor(options?: B62TTMLRendererOptions)
-  attachMediaElement(mediaElement: HTMLMediaElement): void
+  attachMediaElement(mediaElement: HTMLVideoElement): void
   detachMediaElement(): void
   setOverlayElement(overlayElement: HTMLElement): void
   setLive(isLive: boolean): void
@@ -109,7 +109,7 @@ export declare class B62TTMLRenderer {
   render(): void
   readonly eventCount: number
   static parse(text: string, basePts?: number | null, currentTime?: number, forceBaseAlignment?: boolean, options?: object): B62TTMLCue[]
-  static renderCueDOM(overlay: HTMLElement, cue: B62TTMLCue): void
+  static renderCueDOM(overlay: HTMLElement, cue: B62TTMLCue, styleOptions?: B62TTMLRendererOptions, mediaElement?: HTMLVideoElement): void
   static previewCues(cues: B62TTMLCue[], text?: string): string
 }
 
