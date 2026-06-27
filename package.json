@@ -1,6 +1,6 @@
 {
   "name": "aribb62.js",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ARIB STD-B62 / ARIB-TTML parser and browser renderer",
   "type": "module",
   "main": "./src/index.js",
