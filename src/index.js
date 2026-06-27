@@ -26,6 +26,7 @@ import {
     applyTTMLBorder,
     createCueStyleElement,
     cssEscapeUrl,
+    fontFaceFamilyStackForText,
     mapARIBFontFamily,
     mapDisplayAlign,
     mapTextAlignItems,
@@ -186,14 +187,8 @@ class B62TTMLRenderer {
 
         const currentTime = this._currentTime();
         const basePts = this._basePts(data);
-        let effectiveBasePts = basePts;
-        let arrivalAligned = false;
-        const live = this._isLive || (this._mediaElement && this._mediaElement.duration === Infinity);
-
-        if (effectiveBasePts === null && live) {
-            effectiveBasePts = currentTime;
-            arrivalAligned = true;
-        }
+        const effectiveBasePts = basePts;
+        const arrivalAligned = false;
 
         const cues = parseARIBTTML(text, effectiveBasePts, currentTime, arrivalAligned, {
             resourceResolver: resources
@@ -311,6 +306,7 @@ class B62TTMLRenderer {
                 cue.audios.forEach((audio) => audios.push(audio));
             }
         });
+        const fontFaces = collectPushResultFontFaces(cues, this._eventCount);
         const preview = previewTTMLCues(cues, text);
         return {
             eventCount: this._eventCount,
@@ -328,7 +324,8 @@ class B62TTMLRenderer {
             resourceCount: resources ? resources.count : 0,
             preview: preview,
             previewCodePoints: formatTextCodePoints(preview),
-            fontFaceCount: cues.reduce((count, cue) => count + (cue.fontFaces ? cue.fontFaces.length : 0), 0)
+            fontFaceCount: fontFaces.length,
+            fontFaces: fontFaces
         };
     }
 
@@ -520,6 +517,7 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
         applyTTMLStyle(blockElement, block.style, scale);
         applyViewerStyle(blockElement, styleOptions);
+        applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
         if (block.style.backgroundImageUrl) {
             blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
             blockElement.style.backgroundRepeat = 'no-repeat';
@@ -550,7 +548,7 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
             line.style.padding = styleOptions.backgroundPadding;
         }
         block.spans.forEach((span) => {
-            line.appendChild(renderTTMLSpanDOM(span, scale, styleOptions));
+            line.appendChild(renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces));
         });
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
@@ -593,7 +591,7 @@ function getMediaContentViewport(overlay, mediaElement) {
     };
 }
 
-function renderTTMLSpanDOM(span, scale, styleOptions) {
+function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
     if (span.rubyText) {
         const rubyElement = document.createElement('ruby');
         const baseElement = document.createElement('span');
@@ -604,6 +602,7 @@ function renderTTMLSpanDOM(span, scale, styleOptions) {
         rubyTextElement.style.lineHeight = '1';
         applyTTMLStyle(rubyElement, span.style, scale);
         applyViewerStyle(rubyElement, styleOptions);
+        applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
         rubyElement.appendChild(baseElement);
         rubyElement.appendChild(rubyTextElement);
         return rubyElement;
@@ -613,6 +612,7 @@ function renderTTMLSpanDOM(span, scale, styleOptions) {
     spanElement.textContent = span.text;
     applyTTMLStyle(spanElement, span.style, scale);
     applyViewerStyle(spanElement, styleOptions);
+    applyFontFaceStack(spanElement, fontFaces, span.text);
     return spanElement;
 }
 
@@ -719,8 +719,6 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
     let startOffset = 0;
     if (minStart !== null && basePts !== null && (forceBaseAlignment || Math.abs(minStart - basePts) > 0.05)) {
         startOffset = basePts - minStart;
-    } else if (minStart !== null && basePts === null && minStart > currentTime + 10) {
-        startOffset = currentTime - minStart;
     }
 
     return rawCues.map((raw) => {
@@ -1008,6 +1006,51 @@ function applyViewerStyle(element, options) {
             '0 0 4px ' + color
         ].join(', ');
     }
+}
+
+function applyFontFaceStack(element, fontFaces, text) {
+    const fontFaceStack = fontFaceFamilyStackForText(fontFaces, text);
+    if (!fontFaceStack) {
+        return;
+    }
+
+    element.style.fontFamily = element.style.fontFamily ?
+        fontFaceStack + ', ' + element.style.fontFamily :
+        fontFaceStack;
+}
+
+function collectPushResultFontFaces(cues, eventCount) {
+    const fontFaces = [];
+    const seen = {};
+    cues.forEach((cue) => {
+        (cue.fontFaces || []).forEach((fontFace, index) => {
+            const key = [
+                fontFace.family || '',
+                fontFace.url || '',
+                fontFace.format || '',
+                fontFace.unicodeRange || ''
+            ].join('\n');
+            if (seen[key]) {
+                return;
+            }
+            seen[key] = true;
+            const format = String(fontFace.format || '').toLowerCase();
+            fontFaces.push({
+                family: fontFace.family || '',
+                url: fontFace.url || '',
+                format: fontFace.format || '',
+                unicodeRange: fontFace.unicodeRange || '',
+                downloadName: buildFontFaceDownloadName(fontFace, eventCount, index, format)
+            });
+        });
+    });
+    return fontFaces;
+}
+
+function buildFontFaceDownloadName(fontFace, eventCount, index, format) {
+    const family = String(fontFace.family || 'font').replace(/[^0-9A-Za-z._-]+/g, '-').replace(/^-+|-+$/g, '') || 'font';
+    const extension = format === 'woff' ? 'woff' : (format === 'svg' ? 'svg' : 'bin');
+    return 'aribb62-event-' + eventCount + '-font-' + index + '-' + family + '.' + extension;
 }
 
 B62TTMLRenderer.parse = parseARIBTTML;

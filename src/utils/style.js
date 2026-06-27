@@ -150,6 +150,26 @@ export function mapARIBFontFamily(value) {
     }
 }
 
+export function fontFaceFamilyStackForText(fontFaces, text) {
+    if (!fontFaces || fontFaces.length === 0 || !text) {
+        return '';
+    }
+
+    const families = [];
+    const seen = {};
+    fontFaces.forEach((fontFace) => {
+        if (!fontFace.family || seen[fontFace.family]) {
+            return;
+        }
+        if (fontFace.unicodeRange && !textMatchesUnicodeRange(text, fontFace.unicodeRange)) {
+            return;
+        }
+        seen[fontFace.family] = true;
+        families.push('"' + cssEscapeString(fontFace.family) + '"');
+    });
+    return families.join(', ');
+}
+
 export function createFontFaceStyleElement(fontFaces) {
     const styleElement = document.createElement('style');
     styleElement.textContent = fontFaces.map((fontFace) => {
@@ -271,4 +291,42 @@ export function cssTimingFunction(value) {
 
 export function cssAnimationDirection(value) {
     return value === 'alternate' ? 'alternate' : 'normal';
+}
+
+function textMatchesUnicodeRange(text, unicodeRange) {
+    const chars = Array.from(String(text || ''));
+    for (let i = 0; i < chars.length; i++) {
+        if (codePointMatchesUnicodeRange(chars[i].codePointAt(0), unicodeRange)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function codePointMatchesUnicodeRange(codePoint, unicodeRange) {
+    const ranges = String(unicodeRange || '').split(',');
+    for (let i = 0; i < ranges.length; i++) {
+        const range = ranges[i].trim();
+        const match = range.match(/^U\+([0-9A-F?]+)(?:-([0-9A-F]+))?$/i);
+        if (!match) {
+            continue;
+        }
+        let start = match[1].toUpperCase();
+        const end = match[2];
+        if (start.indexOf('?') >= 0) {
+            const min = parseInt(start.replace(/\?/g, '0'), 16);
+            const max = parseInt(start.replace(/\?/g, 'F'), 16);
+            if (codePoint >= min && codePoint <= max) {
+                return true;
+            }
+            continue;
+        }
+
+        const min = parseInt(start, 16);
+        const max = end ? parseInt(end, 16) : min;
+        if (codePoint >= min && codePoint <= max) {
+            return true;
+        }
+    }
+    return false;
 }

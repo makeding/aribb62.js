@@ -59,6 +59,15 @@ export interface B62TTMLPushResult {
   preview: string
   previewCodePoints: string
   fontFaceCount: number
+  fontFaces: B62TTMLFontFace[]
+}
+
+export interface B62TTMLFontFace {
+  family: string
+  url: string
+  format: string
+  unicodeRange: string
+  downloadName: string
 }
 
 export interface B62TTMLSpanCue {
