@@ -57,6 +57,8 @@ export interface B62TTMLPushResult {
   len: number
   resourceCount: number
   preview: string
+  previewCodePoints: string
+  fontFaceCount: number
 }
 
 export interface B62TTMLSpanCue {

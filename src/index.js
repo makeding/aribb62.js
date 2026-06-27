@@ -142,9 +142,6 @@ class B62TTMLRenderer {
         let arrivalAligned = false;
         const live = this._isLive || (this._mediaElement && this._mediaElement.duration === Infinity);
 
-        if (effectiveBasePts !== null && live && Math.abs(effectiveBasePts - currentTime) > 10) {
-            effectiveBasePts = currentTime;
-        }
         if (effectiveBasePts === null && live) {
             effectiveBasePts = currentTime;
             arrivalAligned = true;
@@ -266,6 +263,7 @@ class B62TTMLRenderer {
                 cue.audios.forEach((audio) => audios.push(audio));
             }
         });
+        const preview = previewTTMLCues(cues, text);
         return {
             eventCount: this._eventCount,
             packetId: data && data.packetId,
@@ -280,7 +278,9 @@ class B62TTMLRenderer {
             arrivalAligned: arrivalAligned,
             len: (data && data.len) || (text ? text.length : 0),
             resourceCount: resources ? resources.count : 0,
-            preview: previewTTMLCues(cues, text)
+            preview: preview,
+            previewCodePoints: formatTextCodePoints(preview),
+            fontFaceCount: cues.reduce((count, cue) => count + (cue.fontFaces ? cue.fontFaces.length : 0), 0)
         };
     }
 
@@ -669,7 +669,7 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
     });
 
     let startOffset = 0;
-    if (minStart !== null && basePts !== null && (forceBaseAlignment || Math.abs(minStart - basePts) > 10)) {
+    if (minStart !== null && basePts !== null && (forceBaseAlignment || Math.abs(minStart - basePts) > 0.05)) {
         startOffset = basePts - minStart;
     } else if (minStart !== null && basePts === null && minStart > currentTime + 10) {
         startOffset = currentTime - minStart;
@@ -1644,6 +1644,13 @@ function previewTTMLCues(cues, text) {
         preview = String(text).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     }
     return preview.length > 120 ? preview.slice(0, 117) + '...' : preview;
+}
+
+function formatTextCodePoints(text) {
+    return Array.from(String(text || '')).map((char) => {
+        const code = char.codePointAt(0).toString(16).toUpperCase();
+        return char + '=U+' + code.padStart(4, '0');
+    }).join(' ');
 }
 
 function nearestTimedNode(node) {
