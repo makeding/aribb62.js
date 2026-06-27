@@ -193,7 +193,7 @@ class B62TTMLRenderer {
         const basePts = this._basePts(data);
         const effectiveBasePts = basePts;
         const arrivalAligned = false;
-        const timelineOffset = this._resolveTimelineOffset(data, text, effectiveBasePts);
+        const timelineOffset = this._resolveTimelineOffset(data, text, effectiveBasePts, this._timelineAnchor(data));
 
         const cues = parseARIBTTML(text, effectiveBasePts, currentTime, arrivalAligned, {
             resourceResolver: resources,
@@ -286,7 +286,28 @@ class B62TTMLRenderer {
         return null;
     }
 
-    _resolveTimelineOffset(data, text, basePts) {
+    _timelineAnchor(data) {
+        if (data && Number.isFinite(data.videoMediaDts)) {
+            return data.videoMediaDts / 1000;
+        }
+        if (data && Number.isFinite(data.videoMediaPts)) {
+            return data.videoMediaPts / 1000;
+        }
+        return 0;
+    }
+
+    _resolveTimelineOffset(data, text, basePts, fallbackAnchor) {
+        if (data &&
+            data.subtitleTimingMode === 2 &&
+            Number.isFinite(data.subtitleReferenceStartMediaTime)) {
+            return data.subtitleReferenceStartMediaTime / 1000;
+        }
+        if (data &&
+            data.subtitleTimingMode === 3 &&
+            basePts !== null) {
+            return basePts;
+        }
+
         const minStart = findTTMLMinStart(text);
         if (minStart === null) {
             return null;
@@ -294,7 +315,7 @@ class B62TTMLRenderer {
 
         const key = this._timelineOffsetKey(data);
         if (!Number.isFinite(this._timelineOffsets[key])) {
-            this._timelineOffsets[key] = (basePts !== null ? basePts : 0) - minStart;
+            this._timelineOffsets[key] = (basePts !== null ? basePts : fallbackAnchor) - minStart;
         }
         return this._timelineOffsets[key];
     }
