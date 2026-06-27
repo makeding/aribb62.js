@@ -62,6 +62,7 @@ class B62TTMLRenderer {
         this._mediaElement = options.mediaElement || null;
         this._isLive = !!options.isLive;
         this._maxCues = options.maxCues || 300;
+        this._liveTimingDelay = Number.isFinite(options.liveTimingDelay) ? options.liveTimingDelay : 0.7;
         this._styleOptions = {
             normalFont: options.normalFont || options.fontFamily || '',
             forceStrokeColor: options.forceStrokeColor,
@@ -297,10 +298,20 @@ class B62TTMLRenderer {
     }
 
     _resolveTimelineOffset(data, text, basePts, fallbackAnchor) {
+        const minStart = findTTMLMinStart(text);
         if (data &&
             data.subtitleTimingMode === 2 &&
             Number.isFinite(data.subtitleReferenceStartMediaTime)) {
-            return data.subtitleReferenceStartMediaTime / 1000;
+            const referenceOffset = data.subtitleReferenceStartMediaTime / 1000;
+            if (this._isLive && minStart !== null && Number.isFinite(data.videoMediaDts)) {
+                const key = 'live-reference:' + this._timelineOffsetKey(data);
+                if (!Number.isFinite(this._timelineOffsets[key])) {
+                    const staleBy = (data.videoMediaDts / 1000) - (minStart + referenceOffset);
+                    this._timelineOffsets[key] = Math.max(this._liveTimingDelay, staleBy > 1 ? staleBy - 0.3 : 0);
+                }
+                return referenceOffset + this._timelineOffsets[key];
+            }
+            return referenceOffset;
         }
         if (data &&
             data.subtitleTimingMode === 3 &&
@@ -308,7 +319,6 @@ class B62TTMLRenderer {
             return basePts;
         }
 
-        const minStart = findTTMLMinStart(text);
         if (minStart === null) {
             return null;
         }

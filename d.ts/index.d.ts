@@ -2,6 +2,7 @@ export interface B62TTMLRendererOptions {
   mediaElement?: HTMLVideoElement
   overlayElement?: HTMLElement
   isLive?: boolean
+  liveTimingDelay?: number
   maxCues?: number
   normalFont?: string
   fontFamily?: string
@@ -33,6 +34,14 @@ export interface B62TTMLPushData {
   pts?: number
   rawPts?: number
   dts?: number
+  rawDts?: number
+  subtitleTimingMode?: number
+  subtitleReferenceStartTime?: number
+  subtitleReferenceStartMediaTime?: number
+  videoMediaDts?: number
+  videoMediaPts?: number
+  videoRawDtsBase?: number
+  videoDtsBase?: number
   len?: number
   text?: string
   data?: Uint8Array | ArrayBuffer
