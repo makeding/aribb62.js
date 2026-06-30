@@ -23,10 +23,12 @@ import {
 } from './utils/resources.js';
 import {
     applyARIBMarquee,
+    applyTextStroke,
     applyTTMLBorder,
     createCueStyleElement,
     cssEscapeUrl,
     fontFaceFamilyStackForText,
+    getTextStrokeWidth,
     mapARIBFontFamily,
     mapDisplayAlign,
     mapTextAlignItems,
@@ -67,7 +69,7 @@ class B62TTMLRenderer {
             normalFont: options.normalFont || options.fontFamily || '',
             forceStrokeColor: options.forceStrokeColor,
             forceBackgroundColor: options.forceBackgroundColor || '',
-            backgroundPadding: options.backgroundPadding || '0 0.08em',
+            backgroundPadding: options.backgroundPadding || '0.33em 0.06em',
             lineBackground: !!options.lineBackground
         };
         this._cues = [];
@@ -569,6 +571,10 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         const region = block.region || {};
         const origin = region.origin || [planeWidth * 0.1, planeHeight * 0.78];
         const extent = region.extent || [planeWidth * 0.8, planeHeight * 0.16];
+        const blockLeft = marginX + origin[0] * scale;
+        const blockTop = marginY + origin[1] * scale;
+        const blockWidth = extent[0] * scale;
+        const blockHeight = extent[1] * scale;
         const writingMode = mapWritingMode(block.style.writingMode);
         const isHorizontalWriting = !writingMode.writingMode || writingMode.writingMode === 'horizontal-tb';
         const blockElement = document.createElement('div');
@@ -578,12 +584,8 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.flexDirection = 'column';
         blockElement.style.boxSizing = 'border-box';
         blockElement.style.color = '#fff';
-        blockElement.style.textShadow = '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0 0 4px #000';
+        applyTextStroke(blockElement, 2, '#000');
         blockElement.style.whiteSpace = 'pre-wrap';
-        blockElement.style.left = (marginX + origin[0] * scale) + 'px';
-        blockElement.style.top = (marginY + origin[1] * scale) + 'px';
-        blockElement.style.width = (extent[0] * scale) + 'px';
-        blockElement.style.height = (extent[1] * scale) + 'px';
         blockElement.style.overflow = 'visible';
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
@@ -593,6 +595,12 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         applyTTMLStyle(blockElement, block.style, scale);
         applyViewerStyle(blockElement, styleOptions);
         applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
+        const strokePadding = Math.ceil(getTextStrokeWidth(blockElement));
+        blockElement.style.left = (blockLeft - strokePadding) + 'px';
+        blockElement.style.top = (blockTop - strokePadding) + 'px';
+        blockElement.style.width = (blockWidth + strokePadding * 2) + 'px';
+        blockElement.style.height = (blockHeight + strokePadding * 2) + 'px';
+        blockElement.style.padding = strokePadding + 'px';
         if (block.style.backgroundImageUrl) {
             blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
             blockElement.style.backgroundRepeat = 'no-repeat';
@@ -616,17 +624,49 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         line.style.width = 'auto';
         line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
         line.style.tabSize = '1em';
-        const lineBackgroundColor = styleOptions.forceBackgroundColor || (styleOptions.lineBackground ? blockElement.style.backgroundColor : '');
-        if (lineBackgroundColor) {
-            blockElement.style.backgroundColor = '';
-            line.style.backgroundColor = lineBackgroundColor;
-            line.style.padding = styleOptions.backgroundPadding;
-        }
+        const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
         block.spans.forEach((span) => {
             line.appendChild(renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces));
         });
+        if (lineBackgroundColor) {
+            blockElement.style.backgroundColor = '';
+            clearElementBackgrounds(line);
+            line.style.backgroundColor = lineBackgroundColor;
+            line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
+        }
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
+    });
+}
+
+function resolveLineBackgroundColor(blockElement, block, styleOptions) {
+    if (styleOptions.forceBackgroundColor) {
+        return styleOptions.forceBackgroundColor;
+    }
+    if (blockElement.style.backgroundColor) {
+        return blockElement.style.backgroundColor;
+    }
+
+    const spans = block && block.spans ? block.spans : [];
+    for (let i = 0; i < spans.length; i++) {
+        if (spans[i].style && spans[i].style.backgroundColor) {
+            return parseTTMLColor(spans[i].style.backgroundColor);
+        }
+    }
+    return '';
+}
+
+function normalizeLineBackgroundPadding(value) {
+    const text = String(value || '').trim();
+    return text === '' || text === '0 0.08em' ? '0.33em 0.06em' : text;
+}
+
+function clearElementBackgrounds(element) {
+    if (!element || !element.querySelectorAll) {
+        return;
+    }
+    element.querySelectorAll('*').forEach((child) => {
+        child.style.backgroundColor = '';
     });
 }
 
@@ -1111,13 +1151,7 @@ function applyViewerStyle(element, options) {
     }
     if (options.forceStrokeColor) {
         const color = typeof options.forceStrokeColor === 'string' ? options.forceStrokeColor : '#000';
-        element.style.textShadow = [
-            '-2px -2px 0 ' + color,
-            '2px -2px 0 ' + color,
-            '-2px 2px 0 ' + color,
-            '2px 2px 0 ' + color,
-            '0 0 4px ' + color
-        ].join(', ');
+        applyTextStroke(element, 2, color);
     }
 }
 
@@ -1185,6 +1219,11 @@ function createSVGGlyphElement(glyph) {
     svg.style.overflow = 'visible';
     path.setAttribute('d', glyph.path);
     path.setAttribute('fill', 'currentColor');
+    path.style.stroke = 'var(--aribb62-stroke-color, transparent)';
+    path.style.strokeWidth = 'var(--aribb62-stroke-width, 0px)';
+    path.style.strokeLinecap = 'round';
+    path.style.strokeLinejoin = 'round';
+    path.style.paintOrder = 'stroke fill';
     path.setAttribute('transform', 'translate(0 ' + ascent + ') scale(1 -1)');
     svg.appendChild(path);
     return svg;

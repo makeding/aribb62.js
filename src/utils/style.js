@@ -5,22 +5,11 @@
 import { parseTTMLColor, parseTTMLLength, parseTTMLLengthPair } from './ttml.js';
 
 export function applyTTMLBorder(element, style, scale) {
-    const borders = {
-        border: style.border,
-        borderTop: style.borderTop,
-        borderBottom: style.borderBottom,
-        borderLeft: style.borderLeft,
-        borderRight: style.borderRight
-    };
-    Object.keys(borders).forEach((property) => {
-        if (!borders[property]) {
-            return;
-        }
-        const value = scaleTTMLBorder(borders[property], scale);
-        if (value) {
-            element.style[property] = value;
-        }
-    });
+    const value = style.border || style.borderTop || style.borderBottom || style.borderLeft || style.borderRight;
+    const stroke = parseTTMLTextStroke(value, scale);
+    if (stroke) {
+        applyTextStroke(element, stroke.width, stroke.color);
+    }
 }
 
 export function scaleTTMLBorder(value, scale) {
@@ -31,6 +20,63 @@ export function scaleTTMLBorder(value, scale) {
     const width = parseTTMLLength(parts[1], 3840);
     const scaledWidth = width === null ? parts[1] : Math.max(1, width * scale) + 'px';
     return parts[0] + ' ' + scaledWidth + ' ' + parseTTMLColor(parts.slice(2).join(' '));
+}
+
+export function applyTextStroke(element, width, color) {
+    const strokeWidth = Math.max(1, width);
+    element.style.webkitTextStroke = strokeWidth + 'px ' + color;
+    element.style.setProperty('--aribb62-stroke-color', color);
+    element.style.setProperty('--aribb62-stroke-width', strokeWidth + 'px');
+    element.style.textShadow = 'none';
+}
+
+export function getTextStrokeWidth(element) {
+    const value = element && element.style ? element.style.getPropertyValue('--aribb62-stroke-width') : '';
+    const width = parseFloat(value);
+    return Number.isFinite(width) ? width : 0;
+}
+
+export function parseTTMLTextStroke(value, scale) {
+    const parts = splitStyleTokens(value);
+    const lowerParts = parts.map((part) => part.toLowerCase());
+    if (parts.length === 0 || lowerParts.indexOf('none') >= 0 || lowerParts.indexOf('hidden') >= 0) {
+        return null;
+    }
+
+    let width = null;
+    const colorParts = [];
+    const lineStyles = {
+        solid: true,
+        double: true,
+        dotted: true,
+        dashed: true,
+        groove: true,
+        ridge: true,
+        inset: true,
+        outset: true
+    };
+
+    parts.forEach((part) => {
+        const lower = part.toLowerCase();
+        const parsedWidth = width === null ? parseTTMLLength(part, 3840) : null;
+        if (parsedWidth !== null) {
+            width = parsedWidth;
+            return;
+        }
+        if (lineStyles[lower]) {
+            return;
+        }
+        colorParts.push(part);
+    });
+
+    if (width === null || width <= 0) {
+        return null;
+    }
+
+    return {
+        width: Math.max(1, width * scale),
+        color: parseTTMLColor(colorParts.join(' ') || 'black')
+    };
 }
 
 export function scaleTTMLShadow(value, scale) {
