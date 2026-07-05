@@ -27,12 +27,14 @@ import {
     applyTTMLBorder,
     createCueStyleElement,
     cssEscapeUrl,
+    DEFAULT_ARIB_FONT_STACK,
     fontFaceFamilyStackForText,
     getTextStrokeWidth,
     mapARIBFontFamily,
     mapDisplayAlign,
     mapTextAlignItems,
     mapWritingMode,
+    mergeFontFamilyStacks,
     parseARIBAnimation,
     scaleTTMLShadow
 } from './utils/style.js';
@@ -66,10 +68,12 @@ class B62TTMLRenderer {
         this._maxCues = options.maxCues || 300;
         this._liveTimingDelay = Number.isFinite(options.liveTimingDelay) ? options.liveTimingDelay : 0.7;
         this._styleOptions = {
-            normalFont: options.normalFont || options.fontFamily || '',
+            normalFont: mergeFontFamilyStacks(options.normalFont || options.fontFamily || '', DEFAULT_ARIB_FONT_STACK),
             forceStrokeColor: options.forceStrokeColor,
+            fallbackStrokeColor: options.fallbackStrokeColor === undefined ? 'rgba(0, 0, 0, 0.86)' : options.fallbackStrokeColor,
+            strokeWidth: Number.isFinite(options.strokeWidth) ? options.strokeWidth : 1.5,
             forceBackgroundColor: options.forceBackgroundColor || '',
-            backgroundPadding: options.backgroundPadding || '0.33em 0.06em',
+            backgroundPadding: options.backgroundPadding || '0.08em 0.08em',
             lineBackground: !!options.lineBackground
         };
         this._cues = [];
@@ -396,8 +400,7 @@ class B62TTMLRenderer {
         this._overlay.style.pointerEvents = 'none';
         this._overlay.style.overflow = 'hidden';
         if (!this._overlay.style.fontFamily) {
-            this._overlay.style.fontFamily = this._styleOptions.normalFont ||
-                '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic Medium", "Meiryo", sans-serif';
+            this._overlay.style.fontFamily = this._styleOptions.normalFont;
         }
     }
 
@@ -584,16 +587,17 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.flexDirection = 'column';
         blockElement.style.boxSizing = 'border-box';
         blockElement.style.color = '#fff';
-        applyTextStroke(blockElement, 2, '#000');
         blockElement.style.whiteSpace = 'pre-wrap';
         blockElement.style.overflow = 'visible';
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
+        blockElement.style.fontFamily = styleOptions.normalFont;
         blockElement.style.textAlign = block.style.textAlign || 'center';
         blockElement.style.alignItems = mapTextAlignItems(block.style.textAlign || 'center');
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
         applyTTMLStyle(blockElement, block.style, scale);
         applyViewerStyle(blockElement, styleOptions);
+        applyFallbackReadableTextStyle(blockElement, styleOptions);
         applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
         const strokePadding = Math.ceil(getTextStrokeWidth(blockElement));
         blockElement.style.left = (blockLeft - strokePadding) + 'px';
@@ -629,10 +633,14 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
             line.appendChild(renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces));
         });
         if (lineBackgroundColor) {
-            blockElement.style.backgroundColor = '';
-            clearElementBackgrounds(line);
-            line.style.backgroundColor = lineBackgroundColor;
-            line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
+            if (styleOptions.lineBackground) {
+                blockElement.style.backgroundColor = '';
+                clearElementBackgrounds(line);
+                line.style.backgroundColor = lineBackgroundColor;
+                line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
+            } else if (styleOptions.forceBackgroundColor) {
+                blockElement.style.backgroundColor = lineBackgroundColor;
+            }
         }
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
@@ -658,7 +666,7 @@ function resolveLineBackgroundColor(blockElement, block, styleOptions) {
 
 function normalizeLineBackgroundPadding(value) {
     const text = String(value || '').trim();
-    return text === '' || text === '0 0.08em' ? '0.33em 0.06em' : text;
+    return text || '0.08em 0.08em';
 }
 
 function clearElementBackgrounds(element) {
@@ -1151,8 +1159,18 @@ function applyViewerStyle(element, options) {
     }
     if (options.forceStrokeColor) {
         const color = typeof options.forceStrokeColor === 'string' ? options.forceStrokeColor : '#000';
-        applyTextStroke(element, 2, color);
+        applyTextStroke(element, options.strokeWidth || 1.5, color);
     }
+}
+
+function applyFallbackReadableTextStyle(element, options) {
+    if (!options || options.forceStrokeColor || !options.fallbackStrokeColor) {
+        return;
+    }
+    if (getTextStrokeWidth(element) > 0 || (element.style.textShadow && element.style.textShadow !== 'none')) {
+        return;
+    }
+    applyTextStroke(element, options.strokeWidth || 1.5, options.fallbackStrokeColor);
 }
 
 function applyFontFaceStack(element, fontFaces, text) {

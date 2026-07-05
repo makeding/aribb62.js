@@ -4,6 +4,8 @@
 
 import { parseTTMLColor, parseTTMLLength, parseTTMLLengthPair } from './ttml.js';
 
+export const DEFAULT_ARIB_FONT_STACK = '"Hiragino Maru Gothic Pro", "BIZ UDGothic", "Yu Gothic Medium", sans-serif';
+
 export function applyTTMLBorder(element, style, scale) {
     const value = style.border || style.borderTop || style.borderBottom || style.borderLeft || style.borderRight;
     const stroke = parseTTMLTextStroke(value, scale);
@@ -25,6 +27,7 @@ export function scaleTTMLBorder(value, scale) {
 export function applyTextStroke(element, width, color) {
     const strokeWidth = Math.max(1, width);
     element.style.webkitTextStroke = strokeWidth + 'px ' + color;
+    element.style.paintOrder = 'stroke fill';
     element.style.setProperty('--aribb62-stroke-color', color);
     element.style.setProperty('--aribb62-stroke-width', strokeWidth + 'px');
     element.style.textShadow = 'none';
@@ -186,14 +189,66 @@ export function mapARIBFontFamily(value) {
     const normalized = text.replace(/^['"]|['"]$/g, '');
     switch (normalized) {
         case '丸ゴシック':
-            return '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic", "Meiryo", sans-serif';
+            return mergeFontFamilyStacks('"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO"', DEFAULT_ARIB_FONT_STACK);
         case '太丸ゴシック':
-            return '"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO", "Yu Gothic", "Meiryo", sans-serif';
+            return mergeFontFamilyStacks('"Hiragino Maru Gothic Pro", "HGMaruGothicMPRO"', DEFAULT_ARIB_FONT_STACK);
         case '角ゴシック':
-            return '"Yu Gothic", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif';
+            return mergeFontFamilyStacks('"Yu Gothic", "Hiragino Kaku Gothic ProN", "Meiryo"', DEFAULT_ARIB_FONT_STACK);
+        case 'default':
+        case 'sansSerif':
+        case 'sans-serif':
+            return DEFAULT_ARIB_FONT_STACK;
         default:
             return text;
     }
+}
+
+export function mergeFontFamilyStacks(primary, fallback) {
+    const families = [];
+    const seen = {};
+    splitFontFamilyList(primary).concat(splitFontFamilyList(fallback)).forEach((family) => {
+        const key = family.replace(/^['"]|['"]$/g, '').toLowerCase();
+        if (!key || seen[key]) {
+            return;
+        }
+        seen[key] = true;
+        families.push(family);
+    });
+    return families.join(', ');
+}
+
+export function splitFontFamilyList(value) {
+    const families = [];
+    let current = '';
+    let quote = '';
+    String(value || '').split('').forEach((char) => {
+        if (quote) {
+            current += char;
+            if (char === quote) {
+                quote = '';
+            }
+            return;
+        }
+        if (char === '"' || char === "'") {
+            quote = char;
+            current += char;
+            return;
+        }
+        if (char === ',') {
+            const family = current.trim();
+            if (family) {
+                families.push(family);
+            }
+            current = '';
+            return;
+        }
+        current += char;
+    });
+    const family = current.trim();
+    if (family) {
+        families.push(family);
+    }
+    return families;
 }
 
 export function fontFaceFamilyStackForText(fontFaces, text) {

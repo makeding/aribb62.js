@@ -7,6 +7,8 @@ export interface B62TTMLRendererOptions {
   normalFont?: string
   fontFamily?: string
   forceStrokeColor?: boolean | string
+  fallbackStrokeColor?: false | string
+  strokeWidth?: number
   forceBackgroundColor?: string
   backgroundPadding?: string
   lineBackground?: boolean

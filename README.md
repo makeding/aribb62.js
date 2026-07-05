@@ -25,6 +25,12 @@ const renderer = new aribb62js.B62TTMLRenderer({
   mediaElement: video,
   overlayElement: overlay,
   isLive: true,
+  normalFont: '"Rounded M+ 1m for ARIB", "Hiragino Maru Gothic Pro", "BIZ UDGothic", "Yu Gothic Medium", sans-serif',
+  forceStrokeColor: false,
+  fallbackStrokeColor: 'rgba(0, 0, 0, 0.86)',
+  strokeWidth: 1.5,
+  backgroundPadding: '0 0.08em',
+  lineBackground: true,
 })
 
 player.on(mpegts.Events.MMTS_SUBTITLE_DATA_ARRIVED, data => {
