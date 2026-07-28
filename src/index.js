@@ -39,7 +39,8 @@ import {
     scaleTTMLShadow
 } from './utils/style.js';
 import {
-    closeSmallVerticalGaps,
+    connectedRectPath,
+    groupNearbyRects,
     groupRawTTMLCues,
     selectActiveTTMLCues,
     subtitleMediaTimeSeconds,
@@ -639,8 +640,15 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
         line.style.tabSize = '1em';
         const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
+        const renderedSpans = [];
         block.spans.forEach((span) => {
-            line.appendChild(renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces));
+            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces);
+            line.appendChild(element);
+            renderedSpans.push({
+                element: element,
+                color: span.style && span.style.backgroundColor ?
+                    parseTTMLColor(span.style.backgroundColor) : ''
+            });
         });
         if (lineBackgroundColor) {
             if (styleOptions.lineBackground) {
@@ -658,6 +666,21 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
             } else if (styleOptions.forceBackgroundColor) {
                 blockElement.style.backgroundColor = lineBackgroundColor;
             }
+        } else if (styleOptions.lineBackground && renderedSpans.some((span) => span.color)) {
+            blockElement.style.backgroundColor = '';
+            renderedSpans.forEach((span) => {
+                span.element.style.backgroundColor = '';
+                if (!span.color) {
+                    return;
+                }
+                mergedLineBackgrounds.push({
+                    element: span.element,
+                    color: span.color,
+                    writingMode: writingMode.writingMode || 'horizontal-tb',
+                    top: blockTop,
+                    height: resolveTTMLLineBoxHeight(block, scale)
+                });
+            });
         }
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
@@ -676,7 +699,7 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
         if (rect.width <= 0 || rect.height <= 0) {
             return;
         }
-        const groupKey = [background.groupKey, background.writingMode, background.color].join('|');
+        const groupKey = [background.writingMode, background.color].join('|');
         if (!groups.has(groupKey)) {
             groups.set(groupKey, {color: background.color, rects: []});
         }
@@ -706,19 +729,13 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
     svg.style.overflow = 'visible';
 
     groups.forEach((group) => {
-        const path = document.createElementNS(namespace, 'path');
-        const mergedRects = closeSmallVerticalGaps(group.rects, 1);
-        const commands = mergedRects.map((rect) => [
-            'M', rect.left, rect.top,
-            'H', rect.right,
-            'V', rect.bottom,
-            'H', rect.left,
-            'Z'
-        ].join(' '));
-        path.setAttribute('d', commands.join(' '));
-        path.setAttribute('fill', group.color);
-        path.setAttribute('fill-rule', 'nonzero');
-        svg.appendChild(path);
+        groupNearbyRects(group.rects, 1).forEach((rectGroup) => {
+            const path = document.createElementNS(namespace, 'path');
+            path.setAttribute('d', connectedRectPath(rectGroup, 1));
+            path.setAttribute('fill', group.color);
+            path.setAttribute('fill-rule', 'nonzero');
+            svg.appendChild(path);
+        });
     });
     overlay.insertBefore(svg, overlay.firstChild);
 }

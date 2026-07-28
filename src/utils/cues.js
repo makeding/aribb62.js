@@ -90,6 +90,86 @@ export function closeSmallVerticalGaps(rects, tolerance) {
     return result;
 }
 
+export function groupNearbyRects(rects, tolerance) {
+    const limit = Number.isFinite(tolerance) ? tolerance : 1;
+    const rows = rects.map((rect) => Object.assign({}, rect))
+        .sort((a, b) => a.top - b.top || a.left - b.left)
+        .reduce((result, rect) => {
+            const row = result[result.length - 1];
+            if (row &&
+                Math.abs(row.top - rect.top) <= limit &&
+                Math.abs(row.bottom - rect.bottom) <= limit &&
+                rect.left <= row.right + limit) {
+                row.left = Math.min(row.left, rect.left);
+                row.right = Math.max(row.right, rect.right);
+                row.top = Math.min(row.top, rect.top);
+                row.bottom = Math.max(row.bottom, rect.bottom);
+            } else {
+                result.push(rect);
+            }
+            return result;
+        }, []);
+    const groups = [];
+
+    rows.forEach((rect) => {
+        const touchingGroups = groups.filter((group) => group.some((other) => {
+            const horizontalGap = Math.max(rect.left, other.left) - Math.min(rect.right, other.right);
+            const verticalGap = Math.max(rect.top, other.top) - Math.min(rect.bottom, other.bottom);
+            return horizontalGap <= limit && verticalGap <= limit;
+        }));
+        if (touchingGroups.length === 0) {
+            groups.push([rect]);
+            return;
+        }
+        const target = touchingGroups[0];
+        target.push(rect);
+        touchingGroups.slice(1).forEach((group) => {
+            target.push(...group);
+            groups.splice(groups.indexOf(group), 1);
+        });
+    });
+
+    return groups.map((group) => group.sort((a, b) => a.top - b.top || a.left - b.left));
+}
+
+export function connectedRectPath(rects, tolerance) {
+    if (!rects || rects.length === 0) {
+        return '';
+    }
+    const limit = Number.isFinite(tolerance) ? tolerance : 1;
+    const rows = rects.map((rect) => Object.assign({}, rect))
+        .sort((a, b) => a.top - b.top || a.left - b.left);
+
+    for (let i = 0; i + 1 < rows.length; i++) {
+        const current = rows[i];
+        const next = rows[i + 1];
+        if (Math.abs(next.top - current.bottom) <= limit) {
+            const boundary = (next.top + current.bottom) / 2;
+            current.bottom = boundary;
+            next.top = boundary;
+        }
+    }
+
+    const first = rows[0];
+    const commands = ['M', first.left, first.top, 'H', first.right];
+    rows.forEach((row, index) => {
+        commands.push('V', row.bottom);
+        if (index + 1 < rows.length) {
+            commands.push('H', rows[index + 1].right);
+        }
+    });
+    const last = rows[rows.length - 1];
+    commands.push('H', last.left);
+    for (let i = rows.length - 1; i >= 0; i--) {
+        commands.push('V', rows[i].top);
+        if (i > 0) {
+            commands.push('H', rows[i - 1].left);
+        }
+    }
+    commands.push('Z');
+    return commands.join(' ');
+}
+
 export function subtitleMediaTimeSeconds(data) {
     if (!data) {
         return null;

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
     closeSmallVerticalGaps,
+    connectedRectPath,
+    groupNearbyRects,
     groupRawTTMLCues,
     selectActiveTTMLCues,
     subtitleMediaTimeSeconds,
@@ -52,6 +54,19 @@ assert.deepEqual(closeSmallVerticalGaps([
     {left: 10, top: 20, right: 200, bottom: 51},
     {left: 10, top: 51, right: 150, bottom: 80}
 ]);
+
+const nearbyGroups = groupNearbyRects([
+    {left: 80, top: 16, right: 310, bottom: 32},
+    {left: 80, top: 32, right: 350, bottom: 48},
+    {left: 10, top: 180, right: 100, bottom: 200}
+], 1);
+assert.equal(nearbyGroups.length, 2);
+assert.deepEqual(nearbyGroups[0], [
+    {left: 80, top: 16, right: 310, bottom: 32},
+    {left: 80, top: 32, right: 350, bottom: 48}
+]);
+assert.equal(connectedRectPath(nearbyGroups[0], 1),
+    'M 80 16 H 310 V 32 H 350 V 48 H 80 V 32 H 80 V 16 Z');
 
 assert.equal(normalizeTTMLText('　西原村　御船町'), '　西原村　御船町');
 assert.equal(normalizeTTMLText('  plain text  '), 'plain text');
