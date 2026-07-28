@@ -16,6 +16,9 @@
       "import": "./src/index.js"
     }
   },
+  "scripts": {
+    "test": "node test/cues.test.mjs"
+  },
   "author": "huggy",
   "license": "MIT",
   "keywords": [

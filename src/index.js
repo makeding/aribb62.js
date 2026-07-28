@@ -38,6 +38,7 @@ import {
     parseARIBAnimation,
     scaleTTMLShadow
 } from './utils/style.js';
+import {groupRawTTMLCues, selectActiveTTMLCues, uniformSpanStyleValue} from './utils/cues.js';
 import {
     formatTextCodePoints,
     normalizeTTMLText,
@@ -213,12 +214,16 @@ class B62TTMLRenderer {
                 start: start,
                 end: start + 0.05,
                 clear: true,
+                trackKey: this._trackKey(data),
+                eventId: this._eventCount,
                 plane: [3840, 2160],
                 blocks: []
             });
         } else {
             cues.forEach((cue, index) => {
                 cue.key += ':event:' + this._eventCount + ':' + index;
+                cue.trackKey = this._trackKey(data);
+                cue.eventId = this._eventCount;
                 this._addCue(cue);
             });
         }
@@ -240,16 +245,8 @@ class B62TTMLRenderer {
         }
 
         const currentTime = mediaElement.currentTime || 0;
-        let cue = null;
-        for (let i = this._cues.length - 1; i >= 0; i--) {
-            const candidate = this._cues[i];
-            if (candidate.start <= currentTime && currentTime < candidate.end) {
-                cue = candidate;
-                break;
-            }
-        }
-
-        const key = cue ? cue.key : null;
+        const cues = selectActiveTTMLCues(this._cues, currentTime);
+        const key = cues.map((cue) => cue.key).join('|') || null;
         const layoutKey = this._layoutKey(overlay, mediaElement);
         if (key === this._lastCueKey && layoutKey === this._lastLayoutKey) {
             return;
@@ -258,11 +255,14 @@ class B62TTMLRenderer {
         this._lastLayoutKey = layoutKey;
         overlay.innerHTML = '';
 
-        if (!cue || cue.clear) {
+        if (cues.length === 0) {
             return;
         }
-
-        renderTTMLCueDOM(overlay, cue, this._styleOptions, mediaElement);
+        cues.forEach((cue) => {
+            if (!cue.clear) {
+                renderTTMLCueDOM(overlay, cue, this._styleOptions, mediaElement);
+            }
+        });
     }
 
     _decodeText(data) {
@@ -337,6 +337,13 @@ class B62TTMLRenderer {
     }
 
     _timelineOffsetKey(data) {
+        if (data && data.packetId !== undefined) {
+            return 'packet:' + data.packetId;
+        }
+        return 'default';
+    }
+
+    _trackKey(data) {
         if (data && data.packetId !== undefined) {
             return 'packet:' + data.packetId;
         }
@@ -592,8 +599,9 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.fontFamily = styleOptions.normalFont;
-        blockElement.style.textAlign = block.style.textAlign || 'center';
-        blockElement.style.alignItems = mapTextAlignItems(block.style.textAlign || 'center');
+        const textAlign = block.style.textAlign || 'start';
+        blockElement.style.textAlign = textAlign;
+        blockElement.style.alignItems = mapTextAlignItems(textAlign);
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
         applyTTMLStyle(blockElement, block.style, scale);
         applyViewerStyle(blockElement, styleOptions);
@@ -656,12 +664,7 @@ function resolveLineBackgroundColor(blockElement, block, styleOptions) {
     }
 
     const spans = block && block.spans ? block.spans : [];
-    for (let i = 0; i < spans.length; i++) {
-        if (spans[i].style && spans[i].style.backgroundColor) {
-            return parseTTMLColor(spans[i].style.backgroundColor);
-        }
-    }
-    return '';
+    return uniformSpanStyleValue(spans, 'backgroundColor', parseTTMLColor);
 }
 
 function normalizeLineBackgroundPadding(value) {
@@ -882,7 +885,7 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
         startOffset = basePts - minStart;
     }
 
-    return rawCues.map((raw) => {
+    return groupRawTTMLCues(rawCues).map((raw) => {
         const start = raw.rawStart !== null ? raw.rawStart + startOffset : (basePts !== null ? basePts : currentTime);
         let end = raw.rawEnd !== null ? raw.rawEnd + startOffset : start + 5;
         if (end <= start) {
@@ -896,9 +899,9 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
             plane: plane,
             fontFaces: fontFaces,
             keyframes: keyframes,
-            hasMarquee: raw.block ? blockTreeHasMarquee(raw.block) : false,
+            hasMarquee: raw.blocks.some((block) => blockTreeHasMarquee(block)),
             audios: offsetTTMLAudios(raw.audios, startOffset, start, end),
-            blocks: raw.block ? [raw.block] : []
+            blocks: raw.blocks
         };
     });
 }
