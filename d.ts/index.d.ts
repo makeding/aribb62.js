@@ -9,6 +9,7 @@ export interface B62TTMLRendererOptions {
   forceStrokeColor?: boolean | string
   fallbackStrokeColor?: false | string
   strokeWidth?: number
+  strokeWidthInPlane?: number
   forceBackgroundColor?: string
   backgroundPadding?: string
   lineBackground?: boolean

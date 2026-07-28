@@ -78,6 +78,7 @@ class B62TTMLRenderer {
             forceStrokeColor: options.forceStrokeColor,
             fallbackStrokeColor: options.fallbackStrokeColor === undefined ? 'rgba(0, 0, 0, 0.86)' : options.fallbackStrokeColor,
             strokeWidth: Number.isFinite(options.strokeWidth) ? options.strokeWidth : 1.5,
+            strokeWidthInPlane: Number.isFinite(options.strokeWidthInPlane) ? options.strokeWidthInPlane : null,
             forceBackgroundColor: options.forceBackgroundColor || '',
             backgroundPadding: options.backgroundPadding || '0.08em 0.08em',
             lineBackground: !!options.lineBackground
@@ -605,13 +606,16 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.fontFamily = styleOptions.normalFont;
+        blockElement.style.fontKerning = 'none';
+        blockElement.style.fontVariantEastAsian = 'full-width';
+        blockElement.style.fontFeatureSettings = '"palt" 0, "pkna" 0';
         const textAlign = block.style.textAlign || 'start';
         blockElement.style.textAlign = textAlign;
         blockElement.style.alignItems = mapTextAlignItems(textAlign);
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
         applyTTMLStyle(blockElement, block.style, scale);
-        applyViewerStyle(blockElement, styleOptions);
-        applyFallbackReadableTextStyle(blockElement, styleOptions);
+        applyViewerStyle(blockElement, styleOptions, scale);
+        applyFallbackReadableTextStyle(blockElement, styleOptions, scale);
         applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
         const strokePadding = Math.ceil(getTextStrokeWidth(blockElement));
         blockElement.style.left = (blockLeft - strokePadding) + 'px';
@@ -651,7 +655,12 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
                 blockElement.style.backgroundColor = '';
                 clearElementBackgrounds(line);
                 line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
-                mergedLineBackgrounds.push({element: line, color: lineBackgroundColor});
+                mergedLineBackgrounds.push({
+                    element: line,
+                    color: lineBackgroundColor,
+                    top: blockTop,
+                    height: resolveTTMLLineBoxHeight(block, scale)
+                });
             } else if (styleOptions.forceBackgroundColor) {
                 blockElement.style.backgroundColor = lineBackgroundColor;
             }
@@ -678,9 +687,10 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
         }
         groups.get(background.color).push({
             left: rect.left - overlayRect.left,
-            top: rect.top - overlayRect.top,
+            top: Number.isFinite(background.top) ? background.top : rect.top - overlayRect.top,
             right: rect.right - overlayRect.left,
-            bottom: rect.bottom - overlayRect.top
+            bottom: Number.isFinite(background.top) && Number.isFinite(background.height) ?
+                background.top + background.height : rect.bottom - overlayRect.top
         });
     });
     if (groups.size === 0) {
@@ -716,6 +726,16 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
         svg.appendChild(path);
     });
     overlay.insertBefore(svg, overlay.firstChild);
+}
+
+function resolveTTMLLineBoxHeight(block, scale) {
+    const blockLineHeight = block && block.style ? block.style.lineHeight : '';
+    const spanLineHeight = uniformSpanStyleValue(
+        block && block.spans ? block.spans : [],
+        'lineHeight'
+    );
+    const lineHeight = parseTTMLLength(blockLineHeight || spanLineHeight, 2160);
+    return lineHeight !== null && lineHeight > 0 ? lineHeight * scale : null;
 }
 
 function resolveLineBackgroundColor(blockElement, block, styleOptions) {
@@ -792,7 +812,7 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
         rubyTextElement.style.fontSize = '50%';
         rubyTextElement.style.lineHeight = '1';
         applyTTMLStyle(rubyElement, span.style, scale);
-        applyViewerStyle(rubyElement, styleOptions);
+        applyViewerStyle(rubyElement, styleOptions, scale);
         applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
         appendTTMLTextWithSVGGlyphs(baseElement, span.text, fontFaces);
         appendTTMLTextWithSVGGlyphs(rubyTextElement, span.rubyText, fontFaces);
@@ -803,7 +823,7 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
 
     const spanElement = document.createElement('span');
     applyTTMLStyle(spanElement, span.style, scale);
-    applyViewerStyle(spanElement, styleOptions);
+    applyViewerStyle(spanElement, styleOptions, scale);
     applyFontFaceStack(spanElement, fontFaces, span.text);
     appendTTMLTextWithSVGGlyphs(spanElement, span.text, fontFaces);
     return spanElement;
@@ -1216,7 +1236,7 @@ function applyTTMLStyle(element, style, scale) {
     }
 }
 
-function applyViewerStyle(element, options) {
+function applyViewerStyle(element, options, scale) {
     if (!options) {
         return;
     }
@@ -1225,18 +1245,25 @@ function applyViewerStyle(element, options) {
     }
     if (options.forceStrokeColor) {
         const color = typeof options.forceStrokeColor === 'string' ? options.forceStrokeColor : '#000';
-        applyTextStroke(element, options.strokeWidth || 1.5, color);
+        applyTextStroke(element, resolveViewerStrokeWidth(options, scale), color);
     }
 }
 
-function applyFallbackReadableTextStyle(element, options) {
+function applyFallbackReadableTextStyle(element, options, scale) {
     if (!options || options.forceStrokeColor || !options.fallbackStrokeColor) {
         return;
     }
     if (getTextStrokeWidth(element) > 0 || (element.style.textShadow && element.style.textShadow !== 'none')) {
         return;
     }
-    applyTextStroke(element, options.strokeWidth || 1.5, options.fallbackStrokeColor);
+    applyTextStroke(element, resolveViewerStrokeWidth(options, scale), options.fallbackStrokeColor);
+}
+
+function resolveViewerStrokeWidth(options, scale) {
+    if (Number.isFinite(options.strokeWidthInPlane)) {
+        return options.strokeWidthInPlane * scale;
+    }
+    return options.strokeWidth || 1.5;
 }
 
 function applyFontFaceStack(element, fontFaces, text) {

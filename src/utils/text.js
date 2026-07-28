@@ -32,7 +32,7 @@ export function normalizeTTMLText(text) {
         .replace(/\r\n?/g, '\n')
         .replace(/[ \f\v]+/g, ' ')
         .replace(/[ \t]*\n[ \t]*/g, '\n')
-        .trim();
+        .replace(/^[ \t\n]+|[ \t\n]+$/g, '');
 }
 
 export function formatNumber(value, digits) {

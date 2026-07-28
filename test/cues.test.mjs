@@ -5,6 +5,7 @@ import {
     selectActiveTTMLCues,
     uniformSpanStyleValue
 } from '../src/utils/cues.js';
+import {normalizeTTMLText} from '../src/utils/text.js';
 
 const firstBlock = {spans: [{text: 'first line'}]};
 const secondBlock = {spans: [{text: 'second line'}]};
@@ -50,5 +51,8 @@ assert.deepEqual(closeSmallVerticalGaps([
     {left: 10, top: 20, right: 200, bottom: 51},
     {left: 10, top: 51, right: 150, bottom: 80}
 ]);
+
+assert.equal(normalizeTTMLText('　西原村　御船町'), '　西原村　御船町');
+assert.equal(normalizeTTMLText('  plain text  '), 'plain text');
 
 console.log('cue grouping and concurrent-track selection: ok');
