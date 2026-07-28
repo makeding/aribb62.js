@@ -42,6 +42,7 @@ import {
     closeSmallVerticalGaps,
     groupRawTTMLCues,
     selectActiveTTMLCues,
+    subtitleMediaTimeSeconds,
     uniformSpanStyleValue
 } from './utils/cues.js';
 import {
@@ -287,16 +288,7 @@ class B62TTMLRenderer {
     }
 
     _basePts(data) {
-        if (data && Number.isFinite(data.pts)) {
-            return data.pts / 1000;
-        }
-        if (data && Number.isFinite(data.rawPts)) {
-            return data.rawPts / 1000;
-        }
-        if (data && Number.isFinite(data.dts)) {
-            return data.dts / 1000;
-        }
-        return null;
+        return subtitleMediaTimeSeconds(data);
     }
 
     _timelineAnchor(data) {
@@ -658,6 +650,8 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
                 mergedLineBackgrounds.push({
                     element: line,
                     color: lineBackgroundColor,
+                    groupKey: block.groupKey || 'group:default',
+                    writingMode: writingMode.writingMode || 'horizontal-tb',
                     top: blockTop,
                     height: resolveTTMLLineBoxHeight(block, scale)
                 });
@@ -682,10 +676,11 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
         if (rect.width <= 0 || rect.height <= 0) {
             return;
         }
-        if (!groups.has(background.color)) {
-            groups.set(background.color, []);
+        const groupKey = [background.groupKey, background.writingMode, background.color].join('|');
+        if (!groups.has(groupKey)) {
+            groups.set(groupKey, {color: background.color, rects: []});
         }
-        groups.get(background.color).push({
+        groups.get(groupKey).rects.push({
             left: rect.left - overlayRect.left,
             top: Number.isFinite(background.top) ? background.top : rect.top - overlayRect.top,
             right: rect.right - overlayRect.left,
@@ -710,9 +705,9 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
     svg.style.pointerEvents = 'none';
     svg.style.overflow = 'visible';
 
-    groups.forEach((rects, color) => {
+    groups.forEach((group) => {
         const path = document.createElementNS(namespace, 'path');
-        const mergedRects = closeSmallVerticalGaps(rects, 1);
+        const mergedRects = closeSmallVerticalGaps(group.rects, 1);
         const commands = mergedRects.map((rect) => [
             'M', rect.left, rect.top,
             'H', rect.right,
@@ -721,7 +716,7 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
             'Z'
         ].join(' '));
         path.setAttribute('d', commands.join(' '));
-        path.setAttribute('fill', color);
+        path.setAttribute('fill', group.color);
         path.setAttribute('fill-rule', 'nonzero');
         svg.appendChild(path);
     });
@@ -882,6 +877,8 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
     const body = firstChildByLocalName(tt, 'body');
     const pNodes = descendantsByLocalName(body, 'p');
     const rawCues = [];
+    const presentationGroups = new Map();
+    let nextPresentationGroupId = 0;
 
     pNodes.forEach((pNode, index) => {
         const timingNode = nearestTimedNode(pNode);
@@ -917,6 +914,7 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
             rawStart: rawStart,
             rawEnd: rawEnd,
             block: hasVisual ? {
+                groupKey: ttmlPresentationGroupKey(pNode, presentationGroups, () => nextPresentationGroupId++),
                 region: region,
                 style: blockStyle,
                 spans: spans
@@ -987,6 +985,25 @@ function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) 
             blocks: raw.blocks
         };
     });
+}
+
+function ttmlPresentationGroupKey(node, groups, nextId) {
+    let current = node ? node.parentNode : null;
+    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
+        if (localName(current) === 'div') {
+            break;
+        }
+        current = current.parentNode;
+    }
+    const groupNode = current || (node ? node.parentNode : null);
+    if (!groupNode) {
+        return 'group:default';
+    }
+    if (!groups.has(groupNode)) {
+        const xmlId = getXMLId(groupNode);
+        groups.set(groupNode, xmlId ? 'group:id:' + xmlId : 'group:' + nextId());
+    }
+    return groups.get(groupNode);
 }
 
 function parseTTMLSpans(pNode, styles, inheritedStyle) {

@@ -3,6 +3,7 @@ import {
     closeSmallVerticalGaps,
     groupRawTTMLCues,
     selectActiveTTMLCues,
+    subtitleMediaTimeSeconds,
     uniformSpanStyleValue
 } from '../src/utils/cues.js';
 import {normalizeTTMLText} from '../src/utils/text.js';
@@ -54,5 +55,12 @@ assert.deepEqual(closeSmallVerticalGaps([
 
 assert.equal(normalizeTTMLText('　西原村　御船町'), '　西原村　御船町');
 assert.equal(normalizeTTMLText('  plain text  '), 'plain text');
+
+assert.equal(subtitleMediaTimeSeconds({videoMediaDts: 5322}), 5.322);
+assert.equal(subtitleMediaTimeSeconds({
+    videoMediaDts: 5322,
+    rawPts: 1785229133391
+}), 5.322);
+assert.equal(subtitleMediaTimeSeconds({pts: 4100, videoMediaDts: 5322}), 4.1);
 
 console.log('cue grouping and concurrent-track selection: ok');

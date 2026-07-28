@@ -102,6 +102,7 @@ export interface B62TTMLAudioCue {
 }
 
 export interface B62TTMLBlockCue {
+  groupKey?: string
   region: object | null
   style: Record<string, string>
   spans: B62TTMLSpanCue[]

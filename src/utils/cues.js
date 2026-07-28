@@ -89,3 +89,17 @@ export function closeSmallVerticalGaps(rects, tolerance) {
     }
     return result;
 }
+
+export function subtitleMediaTimeSeconds(data) {
+    if (!data) {
+        return null;
+    }
+    const timelineFields = ['pts', 'dts', 'videoMediaDts', 'videoMediaPts', 'rawPts', 'rawDts'];
+    for (let i = 0; i < timelineFields.length; i++) {
+        const value = data[timelineFields[i]];
+        if (Number.isFinite(value)) {
+            return value / 1000;
+        }
+    }
+    return null;
+}
