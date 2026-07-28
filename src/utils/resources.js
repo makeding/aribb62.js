@@ -218,6 +218,13 @@ export function normalizeB62Resource(item) {
     };
 }
 
+export function sameB62Resource(a, b) {
+    return !!a && !!b &&
+        a.data === b.data &&
+        a.url === b.url &&
+        a.mimeType === b.mimeType;
+}
+
 export function mimeFromB62Resource(resource) {
     if (resource.mimeType) {
         return resource.mimeType;

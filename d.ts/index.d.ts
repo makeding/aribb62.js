@@ -113,6 +113,10 @@ export interface B62TTMLCue {
   start: number
   end: number
   clear: boolean
+  trackKey?: string
+  eventId?: number
+  eventStart?: number
+  resourceScopeKey?: string
   plane: [number, number]
   fontFaces?: object[]
   keyframes?: object[]

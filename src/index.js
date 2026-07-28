@@ -1,63 +1,22 @@
 import {
-    descendantsByLocalName,
-    firstChildByLocalName,
-    getARIBTTMLAttr,
-    getTTMLAttr,
-    getXMLId,
-    hasAncestorByLocalName,
-    localName,
-    nearestTTMLAttr,
-    nearestTimedNode
-} from './utils/dom.js';
-import {
-    applyTTMLResourceStyle,
-    blockTreeHasMarquee,
-    collectTTMLAudioNode,
-    collectTTMLAudios,
-    collectTTMLEmbeddedImages,
-    collectTTMLFontFaces,
-    collectTTMLKeyframes,
     normalizeB62Resources,
     normalizeResourceReference,
-    offsetTTMLAudios
+    sameB62Resource
 } from './utils/resources.js';
 import {
-    applyARIBMarquee,
-    applyTextStroke,
-    applyTTMLBorder,
-    createCueStyleElement,
-    cssEscapeUrl,
     DEFAULT_ARIB_FONT_STACK,
-    fontFaceFamilyStackForText,
-    getTextStrokeWidth,
-    mapARIBFontFamily,
-    mapDisplayAlign,
-    mapTextAlignItems,
-    mapWritingMode,
-    mergeFontFamilyStacks,
-    parseARIBAnimation,
-    scaleTTMLShadow
+    mergeFontFamilyStacks
 } from './utils/style.js';
-import {
-    connectedRectPath,
-    groupNearbyRects,
-    groupRawTTMLCues,
-    selectActiveTTMLCues,
-    subtitleMediaTimeSeconds,
-    uniformSpanStyleValue
-} from './utils/cues.js';
+import {subtitleMediaTimeSeconds} from './utils/cues.js';
+import {findTTMLMinStart, parseARIBTTML} from './parser.js';
+import {renderTTMLCueDOM} from './renderer.js';
+import {B62RendererStateMachine, B62StateKeys} from './utils/state.js';
+import {collectPushResultFontFaces} from './utils/result.js';
+import {getMediaContentViewport, isElementNode} from './utils/viewport.js';
 import {
     formatTextCodePoints,
-    normalizeTTMLText,
     previewTTMLCues
 } from './utils/text.js';
-import {
-    parseTTMLColor,
-    parseTTMLLength,
-    parseTTMLLengthPair,
-    parseTTMLPlane,
-    parseTTMLTime
-} from './utils/ttml.js';
 
 /*
  * ARIB-TTML subtitle parser/renderer for MMTS subtitle payloads.
@@ -74,6 +33,7 @@ class B62TTMLRenderer {
         this._mediaElement = options.mediaElement || null;
         this._isLive = !!options.isLive;
         this._maxCues = options.maxCues || 300;
+        this._state = new B62RendererStateMachine({ maxCues: this._maxCues });
         this._liveTimingDelay = Number.isFinite(options.liveTimingDelay) ? options.liveTimingDelay : 0.7;
         this._styleOptions = {
             normalFont: mergeFontFamilyStacks(options.normalFont || options.fontFamily || '', DEFAULT_ARIB_FONT_STACK),
@@ -85,19 +45,14 @@ class B62TTMLRenderer {
             backgroundPadding: options.backgroundPadding || '0.08em 0.08em',
             lineBackground: !!options.lineBackground
         };
-        this._cues = [];
         this._lastCueKey = null;
         this._lastLayoutKey = null;
         this._clockId = null;
         this._layoutRenderId = null;
         this._resizeObserver = null;
         this._windowResizeAttached = false;
-        this._eventCount = 0;
         this._resourceScopeKey = null;
-        this._resourceUrls = {};
-        this._resourceMap = {};
-        this._resourceObjectUrls = [];
-        this._timelineOffsets = {};
+        this._resourceScopes = new Map();
         this._prepareOverlayElement();
 
         if (this._mediaElement) {
@@ -106,6 +61,9 @@ class B62TTMLRenderer {
     }
 
     attachMediaElement(mediaElement) {
+        if (this._state.lifecycle === 'destroyed') {
+            return;
+        }
         this.detachMediaElement();
         this._mediaElement = mediaElement;
         if (!mediaElement) {
@@ -113,14 +71,22 @@ class B62TTMLRenderer {
         }
 
         this._boundRender = this._boundRender || this.render.bind(this);
-        this._boundStartClock = this._boundStartClock || this.startClock.bind(this);
-        this._boundStopClock = this._boundStopClock || this.stopClock.bind(this);
+        this._boundStartClock = this._boundStartClock || (() => {
+            this._state.play();
+            this.startClock();
+        });
+        this._boundStopClock = this._boundStopClock || (() => {
+            this._state.pause();
+            this.stopClock();
+        });
         mediaElement.addEventListener('timeupdate', this._boundRender);
         mediaElement.addEventListener('seeked', this._boundRender);
         mediaElement.addEventListener('resize', this._boundRender);
         mediaElement.addEventListener('play', this._boundStartClock);
         mediaElement.addEventListener('pause', this._boundStopClock);
+        this._state.attachMedia(mediaElement.paused === true || mediaElement.ended === true);
         this._observeLayout();
+        this.render();
         this.startClock();
     }
 
@@ -128,6 +94,7 @@ class B62TTMLRenderer {
         this.stopClock();
         this._disconnectLayoutObserver();
         if (!this._mediaElement) {
+            this._state.detachMedia();
             return;
         }
 
@@ -137,6 +104,7 @@ class B62TTMLRenderer {
         this._mediaElement.removeEventListener('play', this._boundStartClock);
         this._mediaElement.removeEventListener('pause', this._boundStopClock);
         this._mediaElement = null;
+        this._state.detachMedia();
     }
 
     setOverlayElement(overlayElement) {
@@ -151,7 +119,10 @@ class B62TTMLRenderer {
     }
 
     startClock() {
-        if (this._clockId !== null || typeof window === 'undefined' || !window.requestAnimationFrame) {
+        if (!this._state.canRunClock() ||
+            this._clockId !== null ||
+            typeof window === 'undefined' ||
+            !window.requestAnimationFrame) {
             return;
         }
 
@@ -176,13 +147,14 @@ class B62TTMLRenderer {
         this.detachMediaElement();
         this._cancelLayoutRender();
         this.clear();
-        this._timelineOffsets = {};
         this._clearResourceUrls();
         this._overlay = null;
+        this._state.destroy();
     }
 
     clear() {
-        this._cues = [];
+        this._state.clearPresentations();
+        this._releaseUnusedResourceScopes();
         this._lastCueKey = null;
         this._lastLayoutKey = null;
         if (this._overlay) {
@@ -192,16 +164,21 @@ class B62TTMLRenderer {
 
     reset() {
         this.clear();
-        this._eventCount = 0;
-        this._timelineOffsets = {};
+        this._state.reset();
+        this._resourceScopeKey = null;
+        this._clearResourceUrls();
     }
 
     push(data) {
+        const transaction = this._state.beginPush(data);
+        if (!transaction) {
+            return this._buildPushResult(data, '', [], null, null, false, null, null);
+        }
         const text = this._decodeText(data);
-        this._eventCount++;
-        const resources = this._prepareResourceContext(data);
+        const resources = this._prepareResourceContext(data, transaction.resourceScopeKey);
 
         if (!text) {
+            this._releaseUnusedResourceScopes();
             return this._buildPushResult(data, '', [], null, null, false, resources);
         }
 
@@ -215,34 +192,30 @@ class B62TTMLRenderer {
             resourceResolver: resources,
             timelineOffset: timelineOffset
         });
+        let presentationCues;
         if (cues.length === 0) {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
-            this._addCue({
-                key: 'clear:' + start + ':event:' + this._eventCount,
+            presentationCues = [{
+                key: 'clear:' + start,
                 start: start,
                 end: start + 0.05,
                 clear: true,
-                trackKey: this._trackKey(data),
-                eventId: this._eventCount,
                 plane: [3840, 2160],
                 blocks: []
-            });
+            }];
         } else {
-            cues.forEach((cue, index) => {
-                cue.key += ':event:' + this._eventCount + ':' + index;
-                cue.trackKey = this._trackKey(data);
-                cue.eventId = this._eventCount;
-                this._addCue(cue);
-            });
+            presentationCues = cues;
         }
 
+        this._state.commitPresentation(transaction, presentationCues);
         this._pruneCues(currentTime);
+        this._releaseUnusedResourceScopes();
         this.render();
         return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset);
     }
 
     get eventCount() {
-        return this._eventCount;
+        return this._state.eventCount;
     }
 
     render() {
@@ -253,7 +226,7 @@ class B62TTMLRenderer {
         }
 
         const currentTime = mediaElement.currentTime || 0;
-        const cues = selectActiveTTMLCues(this._cues, currentTime);
+        const cues = this._state.activeCues(currentTime);
         const key = cues.map((cue) => cue.key).join('|') || null;
         const layoutKey = this._layoutKey(overlay, mediaElement);
         if (key === this._lastCueKey && layoutKey === this._lastLayoutKey) {
@@ -309,12 +282,14 @@ class B62TTMLRenderer {
             Number.isFinite(data.subtitleReferenceStartMediaTime)) {
             const referenceOffset = data.subtitleReferenceStartMediaTime / 1000;
             if (this._isLive && minStart !== null && Number.isFinite(data.videoMediaDts)) {
-                const key = 'live-reference:' + this._timelineOffsetKey(data);
-                if (!Number.isFinite(this._timelineOffsets[key])) {
+                const key = this._state.timelineOffsetKey(data, 'live-reference');
+                let liveOffset = this._state.getTimelineOffset(key);
+                if (liveOffset === null) {
                     const staleBy = (data.videoMediaDts / 1000) - (minStart + referenceOffset);
-                    this._timelineOffsets[key] = Math.max(this._liveTimingDelay, staleBy > 1 ? staleBy - 0.3 : 0);
+                    liveOffset = Math.max(this._liveTimingDelay, staleBy > 1 ? staleBy - 0.3 : 0);
+                    this._state.setTimelineOffset(key, liveOffset);
                 }
-                return referenceOffset + this._timelineOffsets[key];
+                return referenceOffset + liveOffset;
             }
             return referenceOffset;
         }
@@ -328,44 +303,21 @@ class B62TTMLRenderer {
             return null;
         }
 
-        const key = this._timelineOffsetKey(data);
-        if (!Number.isFinite(this._timelineOffsets[key])) {
-            this._timelineOffsets[key] = (basePts !== null ? basePts : fallbackAnchor) - minStart;
+        const key = this._state.timelineOffsetKey(data);
+        let timelineOffset = this._state.getTimelineOffset(key);
+        if (timelineOffset === null) {
+            timelineOffset = (basePts !== null ? basePts : fallbackAnchor) - minStart;
+            this._state.setTimelineOffset(key, timelineOffset);
         }
-        return this._timelineOffsets[key];
-    }
-
-    _timelineOffsetKey(data) {
-        if (data && data.packetId !== undefined) {
-            return 'packet:' + data.packetId;
-        }
-        return 'default';
-    }
-
-    _trackKey(data) {
-        if (data && data.packetId !== undefined) {
-            return 'packet:' + data.packetId;
-        }
-        return 'default';
+        return timelineOffset;
     }
 
     _currentTime() {
         return this._mediaElement ? (this._mediaElement.currentTime || 0) : 0;
     }
 
-    _addCue(cue) {
-        this._cues.push(cue);
-        this._cues.sort((a, b) => a.start - b.start);
-        if (this._cues.length > this._maxCues) {
-            this._cues.splice(0, this._cues.length - this._maxCues);
-        }
-    }
-
     _pruneCues(currentTime) {
-        const keepFrom = currentTime - 30;
-        while (this._cues.length > 0 && this._cues[0].end < keepFrom) {
-            this._cues.shift();
-        }
+        this._state.prune(currentTime);
     }
 
     _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset) {
@@ -375,10 +327,10 @@ class B62TTMLRenderer {
                 cue.audios.forEach((audio) => audios.push(audio));
             }
         });
-        const fontFaces = collectPushResultFontFaces(cues, this._eventCount);
+        const fontFaces = collectPushResultFontFaces(cues, this._state.eventCount);
         const preview = previewTTMLCues(cues, text);
         return {
-            eventCount: this._eventCount,
+            eventCount: this._state.eventCount,
             packetId: data && data.packetId,
             cueCount: cues.length,
             cues: cues,
@@ -386,10 +338,10 @@ class B62TTMLRenderer {
             audios: audios,
             text: text,
             pts: data && data.pts,
-            basePts: basePts,
-            effectiveBasePts: effectiveBasePts,
+            basePts: Number.isFinite(basePts) ? basePts : null,
+            effectiveBasePts: Number.isFinite(effectiveBasePts) ? effectiveBasePts : null,
             arrivalAligned: arrivalAligned,
-            timelineOffset: timelineOffset,
+            timelineOffset: Number.isFinite(timelineOffset) ? timelineOffset : null,
             len: (data && data.len) || (text ? text.length : 0),
             resourceCount: resources ? resources.count : 0,
             preview: preview,
@@ -482,31 +434,37 @@ class B62TTMLRenderer {
         ].join(':');
     }
 
-    _prepareResourceContext(data) {
-        const scopeKey = data ?
-            [data.packetId, data.mpuSequenceNumber].filter((value) => value !== undefined).join(':') :
-            '';
-        if (scopeKey !== this._resourceScopeKey) {
-            this._clearResourceUrls();
-            this._resourceScopeKey = scopeKey;
+    _prepareResourceContext(data, scopeKey) {
+        scopeKey = scopeKey || B62StateKeys.resourceScopeKey(data);
+        this._resourceScopeKey = scopeKey;
+        let scope = this._resourceScopes.get(scopeKey);
+        if (!scope) {
+            scope = {
+                urls: {},
+                resources: {},
+                objectUrls: []
+            };
+            this._resourceScopes.set(scopeKey, scope);
         }
 
         normalizeB62Resources(data).forEach((resource) => {
-            const url = this._resourceToUrl(resource);
+            const index = String(resource.index);
+            const previous = scope.resources[index];
+            const url = sameB62Resource(previous, resource) ? scope.urls[index] : this._resourceToUrl(resource, scope);
             if (url) {
-                this._resourceUrls[String(resource.index)] = url;
+                scope.urls[index] = url;
             }
-            this._resourceMap[String(resource.index)] = resource;
+            scope.resources[index] = resource;
         });
 
         return {
-            count: Object.keys(this._resourceUrls).length,
-            resolve: (url) => this._resolveResourceUrl(url),
-            resource: (url) => this._resolveResource(url)
+            count: Object.keys(scope.urls).length,
+            resolve: (url) => this._resolveResourceUrl(scope, url),
+            resource: (url) => this._resolveResource(scope, url)
         };
     }
 
-    _resourceToUrl(resource) {
+    _resourceToUrl(resource, scope) {
         if (!resource) {
             return '';
         }
@@ -519,11 +477,11 @@ class B62TTMLRenderer {
 
         const blob = new Blob([resource.data], { type: resource.mimeType || '' });
         const url = URL.createObjectURL(blob);
-        this._resourceObjectUrls.push(url);
+        scope.objectUrls.push(url);
         return url;
     }
 
-    _resolveResourceUrl(url) {
+    _resolveResourceUrl(scope, url) {
         if (!url) {
             return '';
         }
@@ -532,10 +490,10 @@ class B62TTMLRenderer {
         if (!match) {
             return normalized;
         }
-        return this._resourceUrls[match[1]] || '';
+        return scope.urls[match[1]] || '';
     }
 
-    _resolveResource(url) {
+    _resolveResource(scope, url) {
         if (!url) {
             return null;
         }
@@ -544,871 +502,37 @@ class B62TTMLRenderer {
         if (!match) {
             return null;
         }
-        return this._resourceMap[match[1]] || null;
+        return scope.resources[match[1]] || null;
+    }
+
+    _releaseUnusedResourceScopes() {
+        const referenced = this._state.referencedResourceScopes();
+        if (this._resourceScopeKey !== null) {
+            referenced.add(this._resourceScopeKey);
+        }
+        Array.from(this._resourceScopes.keys()).forEach((scopeKey) => {
+            if (!referenced.has(scopeKey)) {
+                this._clearResourceScope(scopeKey);
+            }
+        });
+    }
+
+    _clearResourceScope(scopeKey) {
+        const scope = this._resourceScopes.get(scopeKey);
+        if (!scope) {
+            return;
+        }
+        if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+            scope.objectUrls.forEach((url) => URL.revokeObjectURL(url));
+        }
+        this._resourceScopes.delete(scopeKey);
     }
 
     _clearResourceUrls() {
-        if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
-            this._resourceObjectUrls.forEach((url) => {
-                URL.revokeObjectURL(url);
-            });
-        }
-        this._resourceObjectUrls = [];
-        this._resourceUrls = {};
-        this._resourceMap = {};
+        Array.from(this._resourceScopes.keys()).forEach((scopeKey) => this._clearResourceScope(scopeKey));
     }
 }
 
-function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
-    styleOptions = styleOptions || {};
-    const viewport = getMediaContentViewport(overlay, mediaElement);
-    const overlayWidth = viewport.width || 1;
-    const overlayHeight = viewport.height || 1;
-    const planeWidth = cue.plane[0] || 3840;
-    const planeHeight = cue.plane[1] || 2160;
-    const scale = Math.min(overlayWidth / planeWidth, overlayHeight / planeHeight);
-    const contentWidth = planeWidth * scale;
-    const contentHeight = planeHeight * scale;
-    const marginX = viewport.left + (overlayWidth - contentWidth) / 2;
-    const marginY = viewport.top + (overlayHeight - contentHeight) / 2;
-    const mergedLineBackgrounds = [];
-
-    if ((cue.fontFaces && cue.fontFaces.length > 0) || (cue.keyframes && cue.keyframes.length > 0) || cue.hasMarquee) {
-        overlay.appendChild(createCueStyleElement(cue, scale));
-    }
-
-    cue.blocks.forEach((block) => {
-        const region = block.region || {};
-        const origin = region.origin || [planeWidth * 0.1, planeHeight * 0.78];
-        const extent = region.extent || [planeWidth * 0.8, planeHeight * 0.16];
-        const blockLeft = marginX + origin[0] * scale;
-        const blockTop = marginY + origin[1] * scale;
-        const blockWidth = extent[0] * scale;
-        const blockHeight = extent[1] * scale;
-        const writingMode = mapWritingMode(block.style.writingMode);
-        const isHorizontalWriting = !writingMode.writingMode || writingMode.writingMode === 'horizontal-tb';
-        const blockElement = document.createElement('div');
-        blockElement.className = 'ttml-subtitle-block';
-        blockElement.style.position = 'absolute';
-        blockElement.style.display = 'flex';
-        blockElement.style.flexDirection = 'column';
-        blockElement.style.boxSizing = 'border-box';
-        blockElement.style.color = '#fff';
-        blockElement.style.whiteSpace = 'pre-wrap';
-        blockElement.style.overflow = 'visible';
-        blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
-        blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
-        blockElement.style.fontFamily = styleOptions.normalFont;
-        blockElement.style.fontKerning = 'none';
-        blockElement.style.fontVariantEastAsian = 'full-width';
-        blockElement.style.fontFeatureSettings = '"palt" 0, "pkna" 0';
-        const textAlign = block.style.textAlign || 'start';
-        blockElement.style.textAlign = textAlign;
-        blockElement.style.alignItems = mapTextAlignItems(textAlign);
-        blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
-        applyTTMLStyle(blockElement, block.style, scale);
-        applyViewerStyle(blockElement, styleOptions, scale);
-        applyFallbackReadableTextStyle(blockElement, styleOptions, scale);
-        applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
-        const strokePadding = Math.ceil(getTextStrokeWidth(blockElement));
-        blockElement.style.left = (blockLeft - strokePadding) + 'px';
-        blockElement.style.top = (blockTop - strokePadding) + 'px';
-        blockElement.style.width = (blockWidth + strokePadding * 2) + 'px';
-        blockElement.style.height = (blockHeight + strokePadding * 2) + 'px';
-        blockElement.style.padding = strokePadding + 'px';
-        if (block.style.backgroundImageUrl) {
-            blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
-            blockElement.style.backgroundRepeat = 'no-repeat';
-            blockElement.style.backgroundSize = 'contain';
-            blockElement.style.backgroundPosition = 'center';
-        }
-        if (writingMode.writingMode) {
-            blockElement.style.writingMode = writingMode.writingMode;
-        }
-        if (writingMode.direction) {
-            blockElement.style.direction = writingMode.direction;
-        }
-        if (block.style.direction) {
-            blockElement.style.direction = block.style.direction;
-        }
-
-        const line = document.createElement('div');
-        line.className = 'ttml-subtitle-line';
-        line.style.boxSizing = 'border-box';
-        line.style.display = 'inline-block';
-        line.style.width = 'auto';
-        line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
-        line.style.tabSize = '1em';
-        const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
-        const renderedSpans = [];
-        block.spans.forEach((span) => {
-            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces);
-            line.appendChild(element);
-            renderedSpans.push({
-                element: element,
-                color: span.style && span.style.backgroundColor ?
-                    parseTTMLColor(span.style.backgroundColor) : ''
-            });
-        });
-        if (lineBackgroundColor) {
-            if (styleOptions.lineBackground) {
-                blockElement.style.backgroundColor = '';
-                clearElementBackgrounds(line);
-                line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
-                mergedLineBackgrounds.push({
-                    element: line,
-                    color: lineBackgroundColor,
-                    groupKey: block.groupKey || 'group:default',
-                    writingMode: writingMode.writingMode || 'horizontal-tb',
-                    top: blockTop,
-                    height: resolveTTMLLineBoxHeight(block, scale)
-                });
-            } else if (styleOptions.forceBackgroundColor) {
-                blockElement.style.backgroundColor = lineBackgroundColor;
-            }
-        } else if (styleOptions.lineBackground && renderedSpans.some((span) => span.color)) {
-            blockElement.style.backgroundColor = '';
-            renderedSpans.forEach((span) => {
-                span.element.style.backgroundColor = '';
-                if (!span.color) {
-                    return;
-                }
-                mergedLineBackgrounds.push({
-                    element: span.element,
-                    color: span.color,
-                    writingMode: writingMode.writingMode || 'horizontal-tb',
-                    top: blockTop,
-                    height: resolveTTMLLineBoxHeight(block, scale)
-                });
-            });
-        }
-        blockElement.appendChild(line);
-        overlay.appendChild(blockElement);
-    });
-    appendMergedLineBackgroundLayer(overlay, mergedLineBackgrounds);
-}
-
-function appendMergedLineBackgroundLayer(overlay, backgrounds) {
-    if (!overlay || backgrounds.length === 0 || !overlay.getBoundingClientRect) {
-        return;
-    }
-    const overlayRect = overlay.getBoundingClientRect();
-    const groups = new Map();
-    backgrounds.forEach((background) => {
-        const rect = background.element.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
-            return;
-        }
-        const groupKey = [background.writingMode, background.color].join('|');
-        if (!groups.has(groupKey)) {
-            groups.set(groupKey, {color: background.color, rects: []});
-        }
-        groups.get(groupKey).rects.push({
-            left: rect.left - overlayRect.left,
-            top: Number.isFinite(background.top) ? background.top : rect.top - overlayRect.top,
-            right: rect.right - overlayRect.left,
-            bottom: Number.isFinite(background.top) && Number.isFinite(background.height) ?
-                background.top + background.height : rect.bottom - overlayRect.top
-        });
-    });
-    if (groups.size === 0) {
-        return;
-    }
-
-    const namespace = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(namespace, 'svg');
-    svg.classList.add('ttml-subtitle-background-layer');
-    svg.setAttribute('width', String(overlay.clientWidth || 1));
-    svg.setAttribute('height', String(overlay.clientHeight || 1));
-    svg.setAttribute('aria-hidden', 'true');
-    svg.style.position = 'absolute';
-    svg.style.inset = '0';
-    svg.style.width = '100%';
-    svg.style.height = '100%';
-    svg.style.pointerEvents = 'none';
-    svg.style.overflow = 'visible';
-
-    groups.forEach((group) => {
-        groupNearbyRects(group.rects, 1).forEach((rectGroup) => {
-            const path = document.createElementNS(namespace, 'path');
-            path.setAttribute('d', connectedRectPath(rectGroup, 1));
-            path.setAttribute('fill', group.color);
-            path.setAttribute('fill-rule', 'nonzero');
-            svg.appendChild(path);
-        });
-    });
-    overlay.insertBefore(svg, overlay.firstChild);
-}
-
-function resolveTTMLLineBoxHeight(block, scale) {
-    const blockLineHeight = block && block.style ? block.style.lineHeight : '';
-    const spanLineHeight = uniformSpanStyleValue(
-        block && block.spans ? block.spans : [],
-        'lineHeight'
-    );
-    const lineHeight = parseTTMLLength(blockLineHeight || spanLineHeight, 2160);
-    return lineHeight !== null && lineHeight > 0 ? lineHeight * scale : null;
-}
-
-function resolveLineBackgroundColor(blockElement, block, styleOptions) {
-    if (styleOptions.forceBackgroundColor) {
-        return styleOptions.forceBackgroundColor;
-    }
-    if (blockElement.style.backgroundColor) {
-        return blockElement.style.backgroundColor;
-    }
-
-    const spans = block && block.spans ? block.spans : [];
-    return uniformSpanStyleValue(spans, 'backgroundColor', parseTTMLColor);
-}
-
-function normalizeLineBackgroundPadding(value) {
-    const text = String(value || '').trim();
-    return text || '0.08em 0.08em';
-}
-
-function clearElementBackgrounds(element) {
-    if (!element || !element.querySelectorAll) {
-        return;
-    }
-    element.querySelectorAll('*').forEach((child) => {
-        child.style.backgroundColor = '';
-    });
-}
-
-function getMediaContentViewport(overlay, mediaElement) {
-    const overlayWidth = overlay.clientWidth || 1;
-    const overlayHeight = overlay.clientHeight || 1;
-    if (!mediaElement || !mediaElement.videoWidth || !mediaElement.videoHeight || !overlay.getBoundingClientRect || !mediaElement.getBoundingClientRect) {
-        return { left: 0, top: 0, width: overlayWidth, height: overlayHeight };
-    }
-
-    const overlayRect = overlay.getBoundingClientRect();
-    const mediaRect = mediaElement.getBoundingClientRect();
-    const mediaLeft = mediaRect.left - overlayRect.left;
-    const mediaTop = mediaRect.top - overlayRect.top;
-    const mediaWidth = mediaRect.width || overlayWidth;
-    const mediaHeight = mediaRect.height || overlayHeight;
-    const videoAspect = mediaElement.videoWidth / mediaElement.videoHeight;
-    const elementAspect = mediaWidth / mediaHeight;
-    let contentWidth = mediaWidth;
-    let contentHeight = mediaHeight;
-    let contentLeft = mediaLeft;
-    let contentTop = mediaTop;
-
-    if (elementAspect > videoAspect) {
-        contentWidth = mediaHeight * videoAspect;
-        contentLeft += (mediaWidth - contentWidth) / 2;
-    } else if (elementAspect < videoAspect) {
-        contentHeight = mediaWidth / videoAspect;
-        contentTop += (mediaHeight - contentHeight) / 2;
-    }
-
-    return {
-        left: contentLeft,
-        top: contentTop,
-        width: contentWidth,
-        height: contentHeight
-    };
-}
-
-function isElementNode(value) {
-    return typeof Element !== 'undefined' && value instanceof Element;
-}
-
-function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
-    if (span.rubyText) {
-        const rubyElement = document.createElement('ruby');
-        const baseElement = document.createElement('span');
-        const rubyTextElement = document.createElement('rt');
-        rubyTextElement.style.fontSize = '50%';
-        rubyTextElement.style.lineHeight = '1';
-        applyTTMLStyle(rubyElement, span.style, scale);
-        applyViewerStyle(rubyElement, styleOptions, scale);
-        applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
-        appendTTMLTextWithSVGGlyphs(baseElement, span.text, fontFaces);
-        appendTTMLTextWithSVGGlyphs(rubyTextElement, span.rubyText, fontFaces);
-        rubyElement.appendChild(baseElement);
-        rubyElement.appendChild(rubyTextElement);
-        return rubyElement;
-    }
-
-    const spanElement = document.createElement('span');
-    applyTTMLStyle(spanElement, span.style, scale);
-    applyViewerStyle(spanElement, styleOptions, scale);
-    applyFontFaceStack(spanElement, fontFaces, span.text);
-    appendTTMLTextWithSVGGlyphs(spanElement, span.text, fontFaces);
-    return spanElement;
-}
-
-function findTTMLMinStart(text) {
-    const doc = new DOMParser().parseFromString(text, 'application/xml');
-    if (doc.getElementsByTagName('parsererror').length > 0 || !doc.documentElement || localName(doc.documentElement) !== 'tt') {
-        return null;
-    }
-
-    const body = firstChildByLocalName(doc.documentElement, 'body');
-    if (!body) {
-        return null;
-    }
-
-    let minStart = null;
-    const collectStart = (node) => {
-        const timingNode = nearestTimedNode(node);
-        let start = parseTTMLTime(getTTMLAttr(node, 'begin'));
-        if (start === null && timingNode) {
-            start = parseTTMLTime(getTTMLAttr(timingNode, 'begin'));
-        }
-        if (start !== null && (minStart === null || start < minStart)) {
-            minStart = start;
-        }
-    };
-
-    descendantsByLocalName(body, 'p').forEach(collectStart);
-    descendantsByLocalName(body, 'audio').forEach((audioNode) => {
-        if (!hasAncestorByLocalName(audioNode, 'p')) {
-            collectStart(audioNode);
-        }
-    });
-    return minStart;
-}
-
-function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) {
-    options = options || {};
-    const doc = new DOMParser().parseFromString(text, 'application/xml');
-    if (doc.getElementsByTagName('parsererror').length > 0 || !doc.documentElement || localName(doc.documentElement) !== 'tt') {
-        return [];
-    }
-
-    const tt = doc.documentElement;
-    if (!firstChildByLocalName(tt, 'body')) {
-        return [];
-    }
-
-    const plane = parseTTMLPlane(tt);
-    const styles = collectTTMLStyles(doc);
-    const regions = collectTTMLRegions(doc, styles, plane);
-    const embeddedImages = collectTTMLEmbeddedImages(doc);
-    const fontFaces = collectTTMLFontFaces(doc, options.resourceResolver);
-    const keyframes = collectTTMLKeyframes(doc);
-    const body = firstChildByLocalName(tt, 'body');
-    const pNodes = descendantsByLocalName(body, 'p');
-    const rawCues = [];
-    const presentationGroups = new Map();
-    let nextPresentationGroupId = 0;
-
-    pNodes.forEach((pNode, index) => {
-        const timingNode = nearestTimedNode(pNode);
-        let rawStart = parseTTMLTime(getTTMLAttr(pNode, 'begin'));
-        let rawEnd = parseTTMLTime(getTTMLAttr(pNode, 'end'));
-        let rawDur = parseTTMLTime(getTTMLAttr(pNode, 'dur'));
-        if (rawStart === null && timingNode) {
-            rawStart = parseTTMLTime(getTTMLAttr(timingNode, 'begin'));
-        }
-        if (rawEnd === null && timingNode) {
-            rawEnd = parseTTMLTime(getTTMLAttr(timingNode, 'end'));
-        }
-        if (rawDur === null && timingNode) {
-            rawDur = parseTTMLTime(getTTMLAttr(timingNode, 'dur'));
-        }
-        if (rawEnd === null && rawDur !== null && rawStart !== null) {
-            rawEnd = rawDur === Infinity ? Infinity : rawStart + rawDur;
-        }
-
-        const regionId = nearestTTMLAttr(pNode, 'region');
-        const region = regions[regionId] || null;
-        const blockStyle = Object.assign({}, region && region.style ? region.style : {}, collectInheritedTTMLStyle(pNode, styles));
-        applyTTMLResourceStyle(blockStyle, embeddedImages, options.resourceResolver);
-        const spans = parseTTMLSpans(pNode, styles, blockStyle);
-        const audios = collectTTMLAudios(pNode, rawStart, rawEnd, rawDur, options.resourceResolver);
-        const hasVisual = spans.length > 0 || !!blockStyle.backgroundImageUrl;
-        if (!hasVisual && audios.length === 0) {
-            return;
-        }
-
-        rawCues.push({
-            index: index,
-            rawStart: rawStart,
-            rawEnd: rawEnd,
-            block: hasVisual ? {
-                groupKey: ttmlPresentationGroupKey(pNode, presentationGroups, () => nextPresentationGroupId++),
-                region: region,
-                style: blockStyle,
-                spans: spans
-            } : null,
-            audios: audios
-        });
-    });
-
-    descendantsByLocalName(body, 'audio').forEach((audioNode, index) => {
-        if (hasAncestorByLocalName(audioNode, 'p')) {
-            return;
-        }
-        const timingNode = nearestTimedNode(audioNode);
-        let rawStart = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'begin')) : null;
-        let rawEnd = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'end')) : null;
-        const rawDur = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'dur')) : null;
-        if (rawEnd === null && rawDur !== null && rawStart !== null) {
-            rawEnd = rawDur === Infinity ? Infinity : rawStart + rawDur;
-        }
-
-        const audio = collectTTMLAudioNode(audioNode, rawStart, rawEnd, rawDur, options.resourceResolver);
-        if (!audio) {
-            return;
-        }
-        rawCues.push({
-            index: pNodes.length + index,
-            rawStart: rawStart,
-            rawEnd: rawEnd,
-            block: null,
-            audios: [audio]
-        });
-    });
-
-    if (rawCues.length === 0) {
-        return [];
-    }
-
-    let minStart = null;
-    rawCues.forEach((cue) => {
-        if (cue.rawStart !== null && (minStart === null || cue.rawStart < minStart)) {
-            minStart = cue.rawStart;
-        }
-    });
-
-    let startOffset = 0;
-    if (Number.isFinite(options.timelineOffset)) {
-        startOffset = options.timelineOffset;
-    } else if (minStart !== null && basePts !== null && (forceBaseAlignment || Math.abs(minStart - basePts) > 0.05)) {
-        startOffset = basePts - minStart;
-    }
-
-    return groupRawTTMLCues(rawCues).map((raw) => {
-        const start = raw.rawStart !== null ? raw.rawStart + startOffset : (basePts !== null ? basePts : currentTime);
-        let end = raw.rawEnd !== null ? raw.rawEnd + startOffset : start + 5;
-        if (end <= start) {
-            end = start + 0.05;
-        }
-        return {
-            key: 'ttml:' + start + ':' + end + ':' + raw.index,
-            start: start,
-            end: end,
-            clear: false,
-            plane: plane,
-            fontFaces: fontFaces,
-            keyframes: keyframes,
-            hasMarquee: raw.blocks.some((block) => blockTreeHasMarquee(block)),
-            audios: offsetTTMLAudios(raw.audios, startOffset, start, end),
-            blocks: raw.blocks
-        };
-    });
-}
-
-function ttmlPresentationGroupKey(node, groups, nextId) {
-    let current = node ? node.parentNode : null;
-    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
-        if (localName(current) === 'div') {
-            break;
-        }
-        current = current.parentNode;
-    }
-    const groupNode = current || (node ? node.parentNode : null);
-    if (!groupNode) {
-        return 'group:default';
-    }
-    if (!groups.has(groupNode)) {
-        const xmlId = getXMLId(groupNode);
-        groups.set(groupNode, xmlId ? 'group:id:' + xmlId : 'group:' + nextId());
-    }
-    return groups.get(groupNode);
-}
-
-function parseTTMLSpans(pNode, styles, inheritedStyle) {
-    const spans = [];
-    appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans);
-    return resolveTTMLRubySpans(spans);
-}
-
-function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {
-    if (!parentNode || !parentNode.childNodes) {
-        return;
-    }
-
-    for (let i = 0; i < parentNode.childNodes.length; i++) {
-        const child = parentNode.childNodes[i];
-        if (child.nodeType === Node.TEXT_NODE || child.nodeType === Node.CDATA_SECTION_NODE) {
-            const text = normalizeTTMLText(child.nodeValue || '');
-            if (text !== '') {
-                spans.push({
-                    text: text,
-                    style: Object.assign({}, inheritedStyle)
-                });
-            }
-            continue;
-        }
-        if (child.nodeType !== Node.ELEMENT_NODE) {
-            continue;
-        }
-
-        const name = localName(child);
-        if (name === 'br') {
-            spans.push({
-                text: '\n',
-                style: Object.assign({}, inheritedStyle)
-            });
-            continue;
-        }
-        if (name !== 'span') {
-            appendTTMLInlineSpans(child, styles, inheritedStyle, spans);
-            continue;
-        }
-
-        const style = mergeTTMLStyleRefs(child, styles, inheritedStyle);
-        const beforeLength = spans.length;
-        appendTTMLInlineSpans(child, styles, style, spans);
-        if (spans.length === beforeLength) {
-            const text = normalizeTTMLText(child.textContent || '');
-            if (text !== '') {
-                spans.push({
-                    text: text,
-                    style: style
-                });
-            }
-        }
-
-        const id = getXMLId(child);
-        const rubyTargetId = getARIBTTMLAttr(child, 'ruby');
-        for (let j = beforeLength; j < spans.length; j++) {
-            if (id && !spans[j].id) {
-                spans[j].id = id;
-            }
-            if (rubyTargetId && !spans[j].rubyTargetId) {
-                spans[j].rubyTargetId = rubyTargetId;
-            }
-        }
-    }
-}
-
-function resolveTTMLRubySpans(spans) {
-    const byId = {};
-    spans.forEach((span) => {
-        if (span.id && !span.rubyTargetId && !byId[span.id]) {
-            byId[span.id] = span;
-        }
-    });
-
-    return spans.filter((span) => {
-        if (!span.rubyTargetId) {
-            return true;
-        }
-        const base = byId[span.rubyTargetId];
-        if (!base) {
-            return true;
-        }
-        base.rubyText = span.text;
-        return false;
-    });
-}
-
-function collectTTMLStyles(doc) {
-    const styles = {};
-    descendantsByLocalName(doc.documentElement, 'style').forEach((styleNode) => {
-        const id = getXMLId(styleNode);
-        if (!id) {
-            return;
-        }
-        styles[id] = mergeTTMLStyleRefs(styleNode, styles, {});
-    });
-    return styles;
-}
-
-function collectTTMLRegions(doc, styles, plane) {
-    const regions = {};
-    descendantsByLocalName(doc.documentElement, 'region').forEach((regionNode) => {
-        const id = getXMLId(regionNode);
-        if (!id) {
-            return;
-        }
-        const style = mergeTTMLStyleRefs(regionNode, styles, {});
-        regions[id] = {
-            origin: parseTTMLLengthPair(getTTMLAttr(regionNode, 'origin'), plane),
-            extent: parseTTMLLengthPair(getTTMLAttr(regionNode, 'extent'), plane),
-            displayAlign: getTTMLAttr(regionNode, 'displayAlign') || style.displayAlign || 'before',
-            style: style
-        };
-    });
-    return regions;
-}
-
-function collectInheritedTTMLStyle(node, styles) {
-    const stack = [];
-    let current = node;
-    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'tt') {
-        const name = localName(current);
-        if (name === 'body' || name === 'div' || name === 'p' || name === 'span') {
-            stack.unshift(current);
-        }
-        current = current.parentNode;
-    }
-
-    let result = {};
-    stack.forEach((styleNode) => {
-        result = mergeTTMLStyleRefs(styleNode, styles, result);
-    });
-    return result;
-}
-
-function mergeTTMLStyleRefs(node, styles, base) {
-    let result = Object.assign({}, base || {});
-    const refs = (node.getAttribute('style') || '').split(/\s+/).filter(Boolean);
-    refs.forEach((ref) => {
-        if (styles[ref]) {
-            result = Object.assign(result, styles[ref]);
-        }
-    });
-
-    const attrs = [
-        'fontSize',
-        'lineHeight',
-        'fontWeight',
-        'fontStyle',
-        'fontFamily',
-        'color',
-        'backgroundColor',
-        'displayAlign',
-        'textAlign',
-        'textDecoration',
-        'textShadow',
-        'backgroundImage',
-        'writingMode',
-        'direction',
-        'opacity'
-    ];
-    attrs.forEach((name) => {
-        const value = getTTMLAttr(node, name);
-        if (value) {
-            result[name] = value;
-        }
-    });
-
-    const aribAttrs = {
-        animation: 'animation',
-        border: 'border',
-        'border-top': 'borderTop',
-        'border-bottom': 'borderBottom',
-        'border-left': 'borderLeft',
-        'border-right': 'borderRight',
-        'letter-spacing': 'letterSpacing',
-        marquee: 'marquee',
-        'text-shadow': 'textShadow'
-    };
-    Object.keys(aribAttrs).forEach((name) => {
-        const value = getARIBTTMLAttr(node, name);
-        if (value) {
-            result[aribAttrs[name]] = value;
-        }
-    });
-    return result;
-}
-
-function applyTTMLStyle(element, style, scale) {
-    if (!style) {
-        return;
-    }
-    if (style.fontSize) {
-        const fontSize = parseTTMLLengthPair(style.fontSize, [3840, 2160]);
-        const height = fontSize ? fontSize[1] : parseTTMLLength(style.fontSize, 2160);
-        if (height) {
-            element.style.fontSize = Math.max(10, height * scale) + 'px';
-        }
-    }
-    if (style.lineHeight) {
-        const lineHeight = parseTTMLLength(style.lineHeight, 2160);
-        if (lineHeight) {
-            element.style.lineHeight = Math.max(10, lineHeight * scale) + 'px';
-        }
-    }
-    if (style.color) {
-        element.style.color = parseTTMLColor(style.color);
-    }
-    if (style.backgroundColor) {
-        element.style.backgroundColor = parseTTMLColor(style.backgroundColor);
-    }
-    if (style.fontWeight) {
-        element.style.fontWeight = style.fontWeight;
-    }
-    if (style.fontStyle) {
-        element.style.fontStyle = style.fontStyle;
-    }
-    if (style.fontFamily) {
-        element.style.fontFamily = mapARIBFontFamily(style.fontFamily);
-    }
-    if (style.textDecoration) {
-        element.style.textDecoration = style.textDecoration;
-    }
-    if (style.textShadow) {
-        element.style.textShadow = scaleTTMLShadow(style.textShadow, scale);
-    }
-    if (style.letterSpacing) {
-        const spacing = parseTTMLLength(style.letterSpacing, 3840);
-        if (spacing !== null) {
-            element.style.letterSpacing = (spacing * scale) + 'px';
-        }
-    }
-    if (style.opacity) {
-        element.style.opacity = String(style.opacity);
-    }
-    applyTTMLBorder(element, style, scale);
-    if (style.animation) {
-        const animation = parseARIBAnimation(style.animation);
-        if (animation) {
-            element.style.animation = animation;
-        }
-    }
-    if (style.marquee) {
-        applyARIBMarquee(element, style.marquee);
-    }
-}
-
-function applyViewerStyle(element, options, scale) {
-    if (!options) {
-        return;
-    }
-    if (options.normalFont) {
-        element.style.fontFamily = options.normalFont;
-    }
-    if (options.forceStrokeColor) {
-        const color = typeof options.forceStrokeColor === 'string' ? options.forceStrokeColor : '#000';
-        applyTextStroke(element, resolveViewerStrokeWidth(options, scale), color);
-    }
-}
-
-function applyFallbackReadableTextStyle(element, options, scale) {
-    if (!options || options.forceStrokeColor || !options.fallbackStrokeColor) {
-        return;
-    }
-    if (getTextStrokeWidth(element) > 0 || (element.style.textShadow && element.style.textShadow !== 'none')) {
-        return;
-    }
-    applyTextStroke(element, resolveViewerStrokeWidth(options, scale), options.fallbackStrokeColor);
-}
-
-function resolveViewerStrokeWidth(options, scale) {
-    if (Number.isFinite(options.strokeWidthInPlane)) {
-        return options.strokeWidthInPlane * scale;
-    }
-    return options.strokeWidth || 1.5;
-}
-
-function applyFontFaceStack(element, fontFaces, text) {
-    const fontFaceStack = fontFaceFamilyStackForText(fontFaces, text);
-    if (!fontFaceStack) {
-        return;
-    }
-
-    element.style.fontFamily = element.style.fontFamily ?
-        fontFaceStack + ', ' + element.style.fontFamily :
-        fontFaceStack;
-}
-
-function appendTTMLTextWithSVGGlyphs(element, text, fontFaces) {
-    const chars = Array.from(String(text || ''));
-    let textBuffer = '';
-    chars.forEach((char) => {
-        const glyph = findSVGGlyph(fontFaces, char);
-        if (!glyph) {
-            textBuffer += char;
-            return;
-        }
-        if (textBuffer) {
-            element.appendChild(document.createTextNode(textBuffer));
-            textBuffer = '';
-        }
-        element.appendChild(createSVGGlyphElement(glyph));
-    });
-    if (textBuffer) {
-        element.appendChild(document.createTextNode(textBuffer));
-    }
-}
-
-function findSVGGlyph(fontFaces, char) {
-    if (!fontFaces || !char) {
-        return null;
-    }
-    const codePoint = char.codePointAt(0);
-    for (let i = 0; i < fontFaces.length; i++) {
-        const fontFace = fontFaces[i];
-        if (fontFace && fontFace.svgGlyphs && fontFace.svgGlyphs[codePoint]) {
-            return fontFace.svgGlyphs[codePoint];
-        }
-    }
-    return null;
-}
-
-function createSVGGlyphElement(glyph) {
-    const namespace = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(namespace, 'svg');
-    const path = document.createElementNS(namespace, 'path');
-    const unitsPerEm = glyph.unitsPerEm || 360;
-    const advance = glyph.horizAdvX || unitsPerEm;
-    const ascent = glyph.ascent || unitsPerEm;
-    const descent = glyph.descent || 0;
-    const height = ascent + Math.abs(descent);
-
-    svg.setAttribute('viewBox', '0 0 ' + advance + ' ' + height);
-    svg.setAttribute('aria-hidden', 'true');
-    svg.style.display = 'inline-block';
-    svg.style.width = (advance / unitsPerEm) + 'em';
-    svg.style.height = '1em';
-    svg.style.verticalAlign = '-0.08em';
-    svg.style.overflow = 'visible';
-    path.setAttribute('d', glyph.path);
-    path.setAttribute('fill', 'currentColor');
-    path.style.stroke = 'var(--aribb62-stroke-color, transparent)';
-    path.style.strokeWidth = 'var(--aribb62-stroke-width, 0px)';
-    path.style.strokeLinecap = 'round';
-    path.style.strokeLinejoin = 'round';
-    path.style.paintOrder = 'stroke fill';
-    path.setAttribute('transform', 'translate(0 ' + ascent + ') scale(1 -1)');
-    svg.appendChild(path);
-    return svg;
-}
-
-function collectPushResultFontFaces(cues, eventCount) {
-    const fontFaces = [];
-    const seen = {};
-    cues.forEach((cue) => {
-        (cue.fontFaces || []).forEach((fontFace, index) => {
-            const key = [
-                fontFace.family || '',
-                fontFace.url || '',
-                fontFace.format || '',
-                fontFace.unicodeRange || ''
-            ].join('\n');
-            if (seen[key]) {
-                return;
-            }
-            seen[key] = true;
-            const format = String(fontFace.format || '').toLowerCase();
-            fontFaces.push({
-                family: fontFace.family || '',
-                url: fontFace.url || '',
-                src: fontFace.src || '',
-                resourceIndex: Number.isFinite(fontFace.resourceIndex) ? fontFace.resourceIndex : null,
-                format: fontFace.format || '',
-                unicodeRange: fontFace.unicodeRange || '',
-                downloadName: buildFontFaceDownloadName(fontFace, eventCount, index, format)
-            });
-        });
-    });
-    return fontFaces;
-}
-
-function buildFontFaceDownloadName(fontFace, eventCount, index, format) {
-    const family = String(fontFace.family || 'font').replace(/[^0-9A-Za-z._-]+/g, '-').replace(/^-+|-+$/g, '') || 'font';
-    const extension = format === 'woff' ? 'woff' : (format === 'svg' ? 'svg' : 'bin');
-    return 'aribb62-event-' + eventCount + '-font-' + index + '-' + family + '.' + extension;
-}
 
 B62TTMLRenderer.parse = parseARIBTTML;
 B62TTMLRenderer.renderCueDOM = renderTTMLCueDOM;
