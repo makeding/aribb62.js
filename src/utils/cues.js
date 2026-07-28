@@ -73,3 +73,19 @@ export function uniformSpanStyleValue(spans, property, normalize) {
     });
     return uniform ? firstValue : '';
 }
+
+export function closeSmallVerticalGaps(rects, tolerance) {
+    const limit = Number.isFinite(tolerance) ? tolerance : 1;
+    const result = rects.map((rect) => Object.assign({}, rect));
+    result.sort((a, b) => a.top - b.top || a.left - b.left);
+    for (let i = 0; i + 1 < result.length; i++) {
+        const current = result[i];
+        const next = result[i + 1];
+        const horizontalOverlap = Math.min(current.right, next.right) - Math.max(current.left, next.left);
+        const gap = next.top - current.bottom;
+        if (horizontalOverlap > 0 && gap > 0 && gap <= limit) {
+            current.bottom = next.top;
+        }
+    }
+    return result;
+}

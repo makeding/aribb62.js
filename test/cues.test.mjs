@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+    closeSmallVerticalGaps,
     groupRawTTMLCues,
     selectActiveTTMLCues,
     uniformSpanStyleValue
@@ -41,5 +42,13 @@ assert.equal(uniformSpanStyleValue([
     {style: {}},
     {style: {backgroundColor: '#000080ff'}}
 ], 'backgroundColor'), '');
+
+assert.deepEqual(closeSmallVerticalGaps([
+    {left: 10, top: 20, right: 200, bottom: 50.4},
+    {left: 10, top: 51, right: 150, bottom: 80}
+], 1), [
+    {left: 10, top: 20, right: 200, bottom: 51},
+    {left: 10, top: 51, right: 150, bottom: 80}
+]);
 
 console.log('cue grouping and concurrent-track selection: ok');

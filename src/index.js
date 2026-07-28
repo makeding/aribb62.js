@@ -38,7 +38,12 @@ import {
     parseARIBAnimation,
     scaleTTMLShadow
 } from './utils/style.js';
-import {groupRawTTMLCues, selectActiveTTMLCues, uniformSpanStyleValue} from './utils/cues.js';
+import {
+    closeSmallVerticalGaps,
+    groupRawTTMLCues,
+    selectActiveTTMLCues,
+    uniformSpanStyleValue
+} from './utils/cues.js';
 import {
     formatTextCodePoints,
     normalizeTTMLText,
@@ -572,6 +577,7 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     const contentHeight = planeHeight * scale;
     const marginX = viewport.left + (overlayWidth - contentWidth) / 2;
     const marginY = viewport.top + (overlayHeight - contentHeight) / 2;
+    const mergedLineBackgrounds = [];
 
     if ((cue.fontFaces && cue.fontFaces.length > 0) || (cue.keyframes && cue.keyframes.length > 0) || cue.hasMarquee) {
         overlay.appendChild(createCueStyleElement(cue, scale));
@@ -644,8 +650,8 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
             if (styleOptions.lineBackground) {
                 blockElement.style.backgroundColor = '';
                 clearElementBackgrounds(line);
-                line.style.backgroundColor = lineBackgroundColor;
                 line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
+                mergedLineBackgrounds.push({element: line, color: lineBackgroundColor});
             } else if (styleOptions.forceBackgroundColor) {
                 blockElement.style.backgroundColor = lineBackgroundColor;
             }
@@ -653,6 +659,63 @@ function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
     });
+    appendMergedLineBackgroundLayer(overlay, mergedLineBackgrounds);
+}
+
+function appendMergedLineBackgroundLayer(overlay, backgrounds) {
+    if (!overlay || backgrounds.length === 0 || !overlay.getBoundingClientRect) {
+        return;
+    }
+    const overlayRect = overlay.getBoundingClientRect();
+    const groups = new Map();
+    backgrounds.forEach((background) => {
+        const rect = background.element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+            return;
+        }
+        if (!groups.has(background.color)) {
+            groups.set(background.color, []);
+        }
+        groups.get(background.color).push({
+            left: rect.left - overlayRect.left,
+            top: rect.top - overlayRect.top,
+            right: rect.right - overlayRect.left,
+            bottom: rect.bottom - overlayRect.top
+        });
+    });
+    if (groups.size === 0) {
+        return;
+    }
+
+    const namespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(namespace, 'svg');
+    svg.classList.add('ttml-subtitle-background-layer');
+    svg.setAttribute('width', String(overlay.clientWidth || 1));
+    svg.setAttribute('height', String(overlay.clientHeight || 1));
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.position = 'absolute';
+    svg.style.inset = '0';
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.pointerEvents = 'none';
+    svg.style.overflow = 'visible';
+
+    groups.forEach((rects, color) => {
+        const path = document.createElementNS(namespace, 'path');
+        const mergedRects = closeSmallVerticalGaps(rects, 1);
+        const commands = mergedRects.map((rect) => [
+            'M', rect.left, rect.top,
+            'H', rect.right,
+            'V', rect.bottom,
+            'H', rect.left,
+            'Z'
+        ].join(' '));
+        path.setAttribute('d', commands.join(' '));
+        path.setAttribute('fill', color);
+        path.setAttribute('fill-rule', 'nonzero');
+        svg.appendChild(path);
+    });
+    overlay.insertBefore(svg, overlay.firstChild);
 }
 
 function resolveLineBackgroundColor(blockElement, block, styleOptions) {
