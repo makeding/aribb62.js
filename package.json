@@ -17,7 +17,8 @@
     }
   },
   "scripts": {
-    "test": "node test/index.mjs"
+    "test": "node test/index.mjs",
+    "test:browser": "node test/run-browser.mjs"
   },
   "author": "huggy",
   "license": "MIT",

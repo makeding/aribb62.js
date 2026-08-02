@@ -250,14 +250,18 @@ class B62TTMLRenderer {
 
         const currentTime = mediaElement.currentTime || 0;
         const cues = this._state.activeCues(currentTime);
+        const context = this._renderContext(cues);
         const key = cues.map((cue) => cue.key).join('|') || null;
         const layoutKey = this._layoutKey(overlay, mediaElement);
         if (key === this._lastCueKey && layoutKey === this._lastLayoutKey) {
+            if (this._outputRenderer && typeof this._outputRenderer.syncTime === 'function') {
+                this._outputRenderer.syncTime(context);
+            }
             return;
         }
         this._lastCueKey = key;
         this._lastLayoutKey = layoutKey;
-        this._outputRenderer.renderScene(this._renderContext(cues));
+        this._outputRenderer.renderScene(context);
     }
 
     _decodeText(data) {
@@ -381,7 +385,8 @@ class B62TTMLRenderer {
             overlayElement: this._overlay,
             mediaElement: this._mediaElement,
             cues: cues || [],
-            styleOptions: this._styleOptions
+            styleOptions: this._styleOptions,
+            requestLayout: this._boundLayoutChange || (this._boundLayoutChange = this._queueLayoutRender.bind(this))
         };
     }
 

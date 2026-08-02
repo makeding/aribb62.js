@@ -2,6 +2,14 @@
 <meta charset="utf-8">
 <title>aribb62.js browser tests</title>
 <pre id="result">RUNNING</pre>
+<script>
+addEventListener('error', (event) => {
+    document.getElementById('result').textContent = 'FAIL: ' + (event.error && event.error.stack || event.message);
+});
+addEventListener('unhandledrejection', (event) => {
+    document.getElementById('result').textContent = 'FAIL: ' + (event.reason && event.reason.stack || event.reason);
+});
+</script>
 <script type="module">
 import {parseARIBTTMLDocument} from '../src/parser.js';
 import {B62TTMLRenderer} from '../src/index.js';
@@ -10,6 +18,12 @@ const assert = (condition, message) => {
     if (!condition) {
         throw new Error(message);
     }
+};
+
+const sizeOverlay = (overlay) => {
+    overlay.style.position = 'relative';
+    overlay.style.width = '384px';
+    overlay.style.height = '216px';
 };
 
 const invalid = parseARIBTTMLDocument('<tt><broken></tt>', 0, 0, false);
@@ -53,6 +67,7 @@ assert(continuation.continuations[0].end === 52, 'continuation end must use the 
 const media = document.createElement('video');
 Object.defineProperty(media, 'currentTime', {value: 20, writable: true});
 const overlay = document.createElement('div');
+sizeOverlay(overlay);
 document.body.append(media, overlay);
 const renderer = new B62TTMLRenderer({mediaElement: media, overlayElement: overlay, isLive: true});
 renderer.push({packetId: 1, mpuSequenceNumber: 1, text: sourceText});
@@ -70,6 +85,13 @@ assert(continuedResult.cues.length === 1, 'renderer must resolve a live continua
 assert(continuedResult.cues[0].blocks[0].spans[0].text === 'old content', 'old DOM content must win');
 renderer.push({packetId: 1, mpuSequenceNumber: 3, text: '<tt><broken></tt>'});
 assert(renderer._state.activeCues(20).length === 1, 'malformed XML must leave the active presentation intact');
+const invalidUtf8 = renderer.push({
+    packetId: 1,
+    mpuSequenceNumber: 4,
+    data: new Uint8Array([0x3c, 0x74, 0x74, 0x3e, 0xc3, 0x28])
+});
+assert(invalidUtf8.documentKind === 'invalid', 'malformed UTF-8 must be rejected');
+assert(renderer._state.activeCues(20).length === 1, 'malformed UTF-8 must leave the active presentation intact');
 renderer.destroy();
 
 const verticalText = `
@@ -80,6 +102,7 @@ const verticalText = `
 </tt>`;
 const verticalMedia = document.createElement('video');
 const verticalOverlay = document.createElement('div');
+sizeOverlay(verticalOverlay);
 document.body.append(verticalMedia, verticalOverlay);
 const verticalRenderer = new B62TTMLRenderer({mediaElement: verticalMedia, overlayElement: verticalOverlay});
 verticalRenderer.push({packetId: 2, text: verticalText});
@@ -88,6 +111,128 @@ assert(
     'region writing mode must select the vertical marquee axis'
 );
 verticalRenderer.destroy();
+
+const styleAndRubyText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-tt">
+  <head><layout><region xml:id="r" tts:origin="0px 0px" tts:extent="3840px 2160px"/></layout></head>
+  <body><div xml:id="base-div">
+    <p xml:id="base-p" region="r" begin="0s" end="10s">
+      <span xml:id="base"><span tts:textOutline="#00ff00ff 2px 1px"
+        arib-tt:text-shadow="1px 1px 0px #000000">基</span>文</span>
+      <span arib-tt:ruby="base">き</span><span arib-tt:ruby="base">ぶん</span>
+    </p>
+  </div><div arib-tt:ruby="base-div"><p region="r" begin="0s" end="10s">全体ルビ</p></div></body>
+</tt>`;
+const styleAndRuby = parseARIBTTMLDocument(styleAndRubyText, 0, 0, false);
+const rubyBlocks = styleAndRuby.cues[0].blocks;
+const baseSpan = rubyBlocks[0].spans.find((span) => span.id === 'base');
+assert(baseSpan.rubyAnnotations.length === 2, 'multiple ruby annotations must be preserved in document order');
+assert(baseSpan.rubyAnnotations[0].text === 'き' && baseSpan.rubyAnnotations[1].text === 'ぶん', 'ruby metadata text');
+assert(rubyBlocks[0].rubyAnnotations[0].text === '全体ルビ', 'div/p ruby association metadata');
+assert(rubyBlocks.some((block) => block.rubyResolved), 'ruby annotation blocks must remain associated');
+
+const styleMedia = document.createElement('video');
+Object.defineProperty(styleMedia, 'currentTime', {value: 0, writable: true});
+const styleOverlay = document.createElement('div');
+sizeOverlay(styleOverlay);
+document.body.append(styleMedia, styleOverlay);
+const styleRenderer = new B62TTMLRenderer({
+    mediaElement: styleMedia,
+    overlayElement: styleOverlay,
+    fallbackStrokeColor: false
+});
+styleRenderer.push({packetId: 3, text: styleAndRubyText});
+assert(styleOverlay.textContent.includes('き') && styleOverlay.textContent.includes('ぶん'), 'ruby annotations must not be removed from broadcaster layout');
+assert(styleOverlay.querySelectorAll('ruby').length === 0, 'TR-B39 ruby metadata must not force HTML ruby layout');
+const outlined = Array.from(styleOverlay.querySelectorAll('span')).find((span) => span.textContent === '基');
+assert(outlined.style.webkitTextStroke.includes('0.2px'), 'textOutline must retain subpixel plane scaling');
+assert(
+    outlined.style.webkitTextStroke.includes('rgb(0, 255, 0)') || outlined.style.webkitTextStroke.includes('#00ff00'),
+    'textOutline color: ' + outlined.style.webkitTextStroke
+);
+assert(
+    outlined.style.textShadow.includes('0.1px 0.1px 0px') &&
+        outlined.style.textShadow.includes('0px 0px 0.1px'),
+    'textOutline blur must compose with text-shadow: ' + outlined.style.textShadow
+);
+assert(styleOverlay.querySelector('.ttml-subtitle-block').style.overflow === 'hidden', 'TR-B39 overflow must always clip');
+styleRenderer.destroy();
+
+const regionStyleReference = parseARIBTTMLDocument(`
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+  <head><styling><style xml:id="position" tts:origin="120px 80px" tts:extent="640px 180px"/></styling>
+    <layout><region xml:id="styled-region" style="position"/></layout></head>
+  <body><div><p region="styled-region" begin="0s" end="1s">styled region</p></div></body>
+</tt>`, 0, 0, false);
+assert(
+    regionStyleReference.cues[0].blocks[0].region.origin[0] === 120 &&
+        regionStyleReference.cues[0].blocks[0].region.extent[1] === 180,
+    'region origin and extent must resolve through a style reference'
+);
+
+const scrollingText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-tt">
+  <head><styling>
+    <arib-tt:keyframes animationName="scroll">
+      <arib-tt:keyframe position="0%" tts:origin="340px 40px"/>
+      <arib-tt:keyframe position="100%" tts:origin="40px 40px"/>
+    </arib-tt:keyframes>
+    <style xml:id="s1" tts:fontSize="46px"/>
+    <style xml:id="s2" arib-tt:animation="scroll 1000ms linear 0ms 1 normal"/>
+  </styling><layout>
+    <region xml:id="r1" style="s1" tts:origin="40px 40px" tts:extent="300px 100px"/>
+    <region xml:id="r2" style="s2" tts:origin="40px 40px" tts:extent="300px 100px"/>
+  </layout></head>
+  <body><div><p region="r1" begin="0s" end="10s"><span region="r2">scrolling</span></p></div></body>
+</tt>`;
+const scrolling = parseARIBTTMLDocument(scrollingText, 0, 0, false);
+const scrollingSpan = scrolling.cues[0].blocks[0].spans[0];
+assert(scrollingSpan.region.origin[0] === 40, 'span region origin must survive parsing');
+assert(
+    scrollingSpan.style.animation && scrollingSpan.style.animation.startsWith('scroll '),
+    'span region style must supply animation: ' + JSON.stringify(scrollingSpan)
+);
+
+const animationMedia = document.createElement('video');
+Object.defineProperty(animationMedia, 'currentTime', {value: 0, writable: true});
+const animationOverlay = document.createElement('div');
+sizeOverlay(animationOverlay);
+document.body.append(animationMedia, animationOverlay);
+const animationRenderer = new B62TTMLRenderer({
+    mediaElement: animationMedia,
+    overlayElement: animationOverlay,
+    fallbackStrokeColor: false
+});
+animationRenderer.push({packetId: 4, text: scrollingText});
+const animationSpan = animationOverlay.querySelector('.ttml-subtitle-line > span');
+const animationStyle = animationOverlay.querySelector('style').textContent;
+assert(animationSpan.style.getPropertyValue('--aribb62-origin-x') === '4px', 'animated span base origin');
+assert(animationSpan.style.animationName.startsWith('aribb62-'), 'keyframe names must be presentation scoped');
+assert(animationStyle.includes('calc(34px - var(--aribb62-origin-x, 0px))'), 'absolute keyframe origin must subtract the span region origin');
+let bbox = animationSpan.getBoundingClientRect();
+let overlayBox = animationOverlay.getBoundingClientRect();
+assert(Math.abs((bbox.left - overlayBox.left) - 34) < 1, 'animation 0% pixel position must be the absolute plane origin');
+animationMedia.currentTime = 0.5;
+animationRenderer.render();
+const animation = animationSpan.getAnimations()[0];
+assert(animation && Math.abs(animation.currentTime - 500) < 1, 'CSS animation must follow media time');
+bbox = animationSpan.getBoundingClientRect();
+overlayBox = animationOverlay.getBoundingClientRect();
+assert(Math.abs((bbox.left - overlayBox.left) - 19) < 1, 'animation midpoint pixel position');
+animationMedia.currentTime = 1;
+animationRenderer.render();
+bbox = animationSpan.getBoundingClientRect();
+assert(Math.abs((bbox.left - overlayBox.left) - 4) < 1, 'animation 100% pixel position');
+animationMedia.currentTime = 0;
+animationRenderer.push({packetId: 5, text: scrollingText});
+const scopedKeyframes = Array.from(animationOverlay.querySelectorAll('style')).map((style) => {
+    const match = style.textContent.match(/@keyframes\s+([^\s{]+)/);
+    return match && match[1];
+}).filter(Boolean);
+assert(scopedKeyframes.length === 2 && scopedKeyframes[0] !== scopedKeyframes[1], 'same-name keyframes from concurrent tracks must not collide');
+animationRenderer.destroy();
 
 document.getElementById('result').textContent = 'PASS';
 </script>

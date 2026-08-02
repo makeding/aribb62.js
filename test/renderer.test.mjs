@@ -82,6 +82,63 @@ assert.deepEqual(Array.from(resourceRenderer._resourceScopes.keys()), ['packet:1
 resourceRenderer.reset();
 assert.equal(resourceRenderer._resourceScopes.size, 0);
 
+let fontLoadCount = 0;
+let resolveFontLoad;
+let fontLayoutCount = 0;
+const fontLoad = new Promise((resolve) => {
+    resolveFontLoad = resolve;
+});
+const fontOverlay = {
+    innerHTML: '',
+    ownerDocument: {
+        fonts: {
+            load() {
+                fontLoadCount++;
+                return fontLoad;
+            }
+        }
+    }
+};
+const fontContext = {
+    overlayElement: fontOverlay,
+    requestLayout() {
+        fontLayoutCount++;
+    },
+    cues: [{
+        fontFaces: [{family: 'ARIB External', url: 'blob:font-1', unicodeRange: 'U+E000'}],
+        blocks: [{spans: [{text: '\ue000'}]}]
+    }]
+};
+const fontRenderer = new B62DOMRenderer();
+fontRenderer._watchFonts(fontContext);
+fontRenderer._watchFonts(fontContext);
+assert.equal(fontLoadCount, 1, 'a pending WOFF load must be deduplicated');
+resolveFontLoad([]);
+await fontLoad;
+await Promise.resolve();
+assert.equal(fontLayoutCount, 1, 'a loaded active WOFF must request one layout pass');
+fontRenderer._watchFonts(fontContext);
+assert.equal(fontLoadCount, 1, 'a loaded WOFF must not start a render loop');
+
+let resolveObsoleteFont;
+const obsoleteLoad = new Promise((resolve) => {
+    resolveObsoleteFont = resolve;
+});
+fontOverlay.ownerDocument.fonts.load = () => obsoleteLoad;
+fontRenderer._watchFonts({
+    overlayElement: fontOverlay,
+    requestLayout: fontContext.requestLayout,
+    cues: [{
+        fontFaces: [{family: 'Old font', url: 'blob:font-2'}],
+        blocks: [{spans: [{text: 'old'}]}]
+    }]
+});
+fontRenderer.clear({overlayElement: fontOverlay});
+resolveObsoleteFont([]);
+await obsoleteLoad;
+await Promise.resolve();
+assert.equal(fontLayoutCount, 1, 'an obsolete WOFF must not redraw a cleared scene');
+
 const renderedScenes = [];
 const outputRenderer = {
     clear(context) {

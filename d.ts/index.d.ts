@@ -21,10 +21,12 @@ export interface B62RenderContext {
   mediaElement: HTMLVideoElement | null
   cues: B62TTMLCue[]
   styleOptions: B62TTMLRendererOptions
+  requestLayout?: () => void
 }
 
 export interface B62OutputRenderer {
   renderScene(context: B62RenderContext): void
+  syncTime?(context: B62RenderContext): void
   clear?(context: B62RenderContext): void
   destroy?(context: B62RenderContext): void
 }
@@ -33,6 +35,7 @@ export declare class B62DOMRenderer implements B62OutputRenderer {
   renderScene(context: B62RenderContext): void
   clear(context: B62RenderContext): void
   destroy(context: B62RenderContext): void
+  syncTime(context: B62RenderContext): void
 }
 
 export interface B62TTMLResource {
@@ -109,7 +112,18 @@ export interface B62TTMLFontFace {
 export interface B62TTMLSpanCue {
   text: string
   rubyText?: string
+  rubyTargetId?: string
+  rubyResolved?: boolean
+  rubyAnnotations?: B62TTMLRubyAssociation[]
+  region?: object | null
   style: Record<string, string>
+}
+
+export interface B62TTMLRubyAssociation {
+  id: string
+  targetId: string
+  text: string
+  element?: string
 }
 
 export interface B62TTMLAudioCue {
@@ -128,6 +142,9 @@ export interface B62TTMLBlockCue {
   region: object | null
   style: Record<string, string>
   contentStyle?: Record<string, string>
+  rubyTargetId?: string
+  rubyResolved?: boolean
+  rubyAnnotations?: B62TTMLRubyAssociation[]
   spans: B62TTMLSpanCue[]
 }
 

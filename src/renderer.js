@@ -28,11 +28,19 @@ import {parseTTMLColor, parseTTMLLength, parseTTMLLengthPair} from './utils/ttml
  * B62 state machine.
  */
 export class B62DOMRenderer {
+    constructor() {
+        this._fontLoads = new Map();
+        this._activeFontKeys = new Set();
+        this._requestLayout = null;
+        this._destroyed = false;
+    }
+
     clear(context) {
         const overlay = context && context.overlayElement;
         if (overlay) {
             overlay.innerHTML = '';
         }
+        this._activeFontKeys.clear();
     }
 
     renderScene(context) {
@@ -52,10 +60,80 @@ export class B62DOMRenderer {
                 );
             }
         });
+        this._watchFonts(context);
+        this.syncTime(context);
     }
 
     destroy(context) {
         this.clear(context);
+        this._destroyed = true;
+        this._requestLayout = null;
+    }
+
+    syncTime(context) {
+        const overlay = context && context.overlayElement;
+        const media = context && context.mediaElement;
+        if (!overlay || !media || typeof overlay.getAnimations !== 'function') {
+            return;
+        }
+        overlay.getAnimations({subtree: true}).forEach((animation) => {
+            const target = animation.effect && animation.effect.target;
+            const cueElement = target && target.closest ? target.closest('[data-aribb62-cue-start]') : null;
+            if (!cueElement) {
+                return;
+            }
+            const cueStart = Number(cueElement.getAttribute('data-aribb62-cue-start'));
+            if (!Number.isFinite(cueStart)) {
+                return;
+            }
+            animation.pause();
+            animation.currentTime = Math.max(0, ((media.currentTime || 0) - cueStart) * 1000);
+        });
+    }
+
+    _watchFonts(context) {
+        const overlay = context && context.overlayElement;
+        const ownerDocument = overlay && overlay.ownerDocument;
+        const fontSet = ownerDocument && ownerDocument.fonts;
+        this._requestLayout = context && context.requestLayout;
+        this._activeFontKeys = new Set();
+        if (!fontSet || typeof fontSet.load !== 'function') {
+            return;
+        }
+
+        const requests = new Map();
+        (context.cues || []).forEach((cue) => {
+            const text = cue.blocks.map((block) => block.spans.map((span) => span.text || '').join('')).join('');
+            (cue.fontFaces || []).forEach((fontFace) => {
+                if (!fontFace || !fontFace.family || !fontFace.url || fontFace.svgGlyphs) {
+                    return;
+                }
+                const key = [fontFace.family, fontFace.url, fontFace.unicodeRange || ''].join('|');
+                this._activeFontKeys.add(key);
+                if (requests.has(key)) {
+                    requests.get(key).text += text;
+                } else {
+                    requests.set(key, {fontFace: fontFace, text: text});
+                }
+            });
+        });
+
+        requests.forEach((request, key) => {
+            if (this._fontLoads.has(key)) {
+                return;
+            }
+            const family = String(request.fontFace.family).replace(/["\\\n\r]/g, '\\$&');
+            const record = {state: 'pending'};
+            this._fontLoads.set(key, record);
+            Promise.resolve(fontSet.load('16px "' + family + '"', request.text || ' ')).then(() => {
+                record.state = 'loaded';
+                if (!this._destroyed && this._activeFontKeys.has(key) && typeof this._requestLayout === 'function') {
+                    this._requestLayout();
+                }
+            }, () => {
+                record.state = 'failed';
+            });
+        });
     }
 }
 
@@ -72,9 +150,10 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     const marginX = viewport.left + (overlayWidth - contentWidth) / 2;
     const marginY = viewport.top + (overlayHeight - contentHeight) / 2;
     const mergedLineBackgrounds = [];
+    const animationNames = cueAnimationNames(cue);
 
     if ((cue.fontFaces && cue.fontFaces.length > 0) || (cue.keyframes && cue.keyframes.length > 0) || cue.hasMarquee) {
-        overlay.appendChild(createCueStyleElement(cue, scale));
+        overlay.appendChild(createCueStyleElement(cue, scale, animationNames));
     }
 
     cue.blocks.forEach((block) => {
@@ -89,6 +168,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         const isHorizontalWriting = !writingMode.writingMode || writingMode.writingMode === 'horizontal-tb';
         const blockElement = document.createElement('div');
         blockElement.className = 'ttml-subtitle-block';
+        blockElement.setAttribute('data-aribb62-cue-start', String(cue.start));
         blockElement.style.position = 'absolute';
         blockElement.style.display = 'flex';
         blockElement.style.flexDirection = 'column';
@@ -149,11 +229,11 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         if (!lineStyle.writingMode && block.style.writingMode) {
             lineStyle.writingMode = block.style.writingMode;
         }
-        applyTTMLStyle(line, lineStyle, scale);
+        applyTTMLStyle(line, lineStyle, scale, {animationNames: animationNames});
         const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
         const renderedSpans = [];
         block.spans.forEach((span) => {
-            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces, region);
+            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces, region, animationNames);
             line.appendChild(element);
             renderedSpans.push({
                 element: element,
@@ -293,7 +373,7 @@ function clearElementBackgrounds(element) {
     });
 }
 
-function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion) {
+function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion, animationNames) {
     const fontWidthRatio = resolveTTMLFontWidthRatio(span.style);
     if (span.rubyText) {
         const rubyElement = document.createElement('ruby');
@@ -307,14 +387,14 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion) {
         rubyElement.appendChild(rubyTextElement);
         if (fontWidthRatio !== 1) {
             const wrapper = document.createElement('span');
-            applyTTMLStyle(wrapper, span.style, scale);
+            applyTTMLStyle(wrapper, span.style, scale, {animationNames: animationNames});
             applyViewerStyle(wrapper, styleOptions, scale);
             applyFontFaceStack(wrapper, fontFaces, (span.text || '') + (span.rubyText || ''));
             applyTTMLFontWidth(wrapper, rubyElement, fontWidthRatio);
             applyTTMLSpanRegion(wrapper, span.region, parentRegion, scale);
             return wrapper;
         }
-        applyTTMLStyle(rubyElement, span.style, scale);
+        applyTTMLStyle(rubyElement, span.style, scale, {animationNames: animationNames});
         applyViewerStyle(rubyElement, styleOptions, scale);
         applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
         applyTTMLSpanRegion(rubyElement, span.region, parentRegion, scale);
@@ -322,7 +402,7 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion) {
     }
 
     const spanElement = document.createElement('span');
-    applyTTMLStyle(spanElement, span.style, scale);
+    applyTTMLStyle(spanElement, span.style, scale, {animationNames: animationNames});
     applyViewerStyle(spanElement, styleOptions, scale);
     applyFontFaceStack(spanElement, fontFaces, span.text);
     if (fontWidthRatio !== 1) {
@@ -473,7 +553,7 @@ function applyTTMLStyle(element, style, scale, options) {
         applyTTMLBorder(element, style, scale);
     }
     if (style.animation && !options.skipAnimation) {
-        const animation = parseARIBAnimation(style.animation);
+        const animation = parseARIBAnimation(style.animation, options.animationNames);
         if (animation) {
             element.style.animation = animation;
         }
@@ -481,6 +561,22 @@ function applyTTMLStyle(element, style, scale, options) {
     if (style.marquee && !options.skipMarquee) {
         applyARIBMarquee(element, style.marquee, style.writingMode);
     }
+}
+
+function cueAnimationNames(cue) {
+    const result = {};
+    const seed = [cue.trackKey || '', cue.eventId || 0, cue.key || ''].join('|');
+    let hash = 2166136261;
+    for (let i = 0; i < seed.length; i++) {
+        hash ^= seed.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    (cue.keyframes || []).forEach((keyframes, index) => {
+        if (keyframes && keyframes.name) {
+            result[keyframes.name] = 'aribb62-' + (hash >>> 0).toString(36) + '-' + index + '-' + keyframes.name;
+        }
+    });
+    return result;
 }
 
 function applyViewerStyle(element, options, scale) {

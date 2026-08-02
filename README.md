@@ -12,10 +12,11 @@ Implemented renderer basics:
 
 - TTML timing, regions, color, one- and two-value font size, line height, and display alignment
 - ARIB-TTML `writingMode` mapping for horizontal and vertical captions
-- ARIB-TTML `arib-tt:ruby` spans linked to a base element by `xml:id`
+- ARIB-TTML `arib-tt:ruby` associations on `div`, `p`, and `span`, preserving broadcaster-provided layout
 - `smpte:backgroundImage` with embedded `smpte:image` or same-MPU `subt://n` resources
 - `arib-tt:font-face` with same-MPU `subt://n` font resources
 - ARIB-TTML extension CSS mapping for `arib-tt:border`, `arib-tt:letter-spacing`, `arib-tt:text-shadow`, `arib-tt:marquee`, `arib-tt:keyframes`, and `arib-tt:animation`
+- TR-B39 span-level regions, fixed overflow clipping, media-clock animation synchronization, and absolute keyframe-origin mapping
 - `dur` and `indefinite` timing for live-mode continued presentation
 - `arib-tt:audio` metadata extraction (`romsound://n` and `subt://n` are exposed, playback is left to the host)
 - UTF-8 text with LF/TAB preserved for browser `pre-wrap` rendering

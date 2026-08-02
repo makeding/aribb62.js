@@ -108,7 +108,7 @@ export function scaleTTMLShadow(value, scale) {
     ].join(' ');
 }
 
-export function parseARIBAnimation(value) {
+export function parseARIBAnimation(value, animationNames) {
     const parts = splitStyleTokens(value);
     if (parts[2] && /^steps\(/.test(parts[2]) && !/\)$/.test(parts[2]) && parts[3]) {
         parts.splice(2, 2, (parts[2] + parts[3]).replace(/\s+/g, ''));
@@ -116,8 +116,9 @@ export function parseARIBAnimation(value) {
     if (parts.length < 6 || !isSafeCssIdentifier(parts[0])) {
         return '';
     }
+    const animationName = animationNames && animationNames[parts[0]] ? animationNames[parts[0]] : parts[0];
     return [
-        parts[0],
+        animationName,
         cssTime(parts[1]),
         cssTimingFunction(parts[2]),
         cssTime(parts[3]),
@@ -298,7 +299,7 @@ export function createFontFaceStyleElement(fontFaces) {
     return styleElement;
 }
 
-export function createCueStyleElement(cue, scale) {
+export function createCueStyleElement(cue, scale, animationNames) {
     const styleElement = document.createElement('style');
     const css = [];
 
@@ -324,7 +325,9 @@ export function createCueStyleElement(cue, scale) {
                 const declarations = keyframeStyleToCSS(frame.style, scale);
                 return frame.position + ' { ' + declarations.join('; ') + '; }';
             });
-            css.push('@keyframes ' + keyframes.name + ' { ' + frames.join(' ') + ' }');
+            const animationName = animationNames && animationNames[keyframes.name] ?
+                animationNames[keyframes.name] : keyframes.name;
+            css.push('@keyframes ' + animationName + ' { ' + frames.join(' ') + ' }');
         });
     }
 

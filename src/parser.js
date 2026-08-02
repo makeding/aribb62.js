@@ -322,7 +322,7 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
         const regionId = getTTMLAttr(child, 'region');
         const region = regionId && regions[regionId] ? regions[regionId] : inheritedRegion;
         const regionStyle = region && region.style ?
-            Object.assign({}, inheritedStyle, inheritedInlineTTMLStyle(region.style)) : inheritedStyle;
+            Object.assign({}, inheritedStyle, region.style) : inheritedStyle;
         const style = mergeTTMLStyleRefs(child, styles, regionStyle);
         const beforeLength = spans.length;
         appendTTMLInlineSpans(child, styles, style, spans, regions, region);
