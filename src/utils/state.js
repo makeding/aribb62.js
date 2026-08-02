@@ -99,21 +99,12 @@ export class B62RendererStateMachine {
         this._eventCount++;
         const nextTrackKey = trackKey(data);
         const nextEpochKey = timelineEpochKey(data);
-        if (hasExplicitTimelineEpoch(data)) {
-            const previousEpochKey = this._trackEpochs.get(nextTrackKey);
-            if (previousEpochKey && previousEpochKey !== nextEpochKey) {
-                this._presentations = this._presentations.filter((presentation) =>
-                    presentation.trackKey !== nextTrackKey
-                );
-                this._clearTimelineOffsetsForTrack(nextTrackKey);
-            }
-            this._trackEpochs.set(nextTrackKey, nextEpochKey);
-        }
         return {
             eventId: this._eventCount,
             trackKey: nextTrackKey,
             resourceScopeKey: resourceScopeKey(data),
-            timelineEpochKey: nextEpochKey
+            timelineEpochKey: nextEpochKey,
+            hasExplicitTimelineEpoch: hasExplicitTimelineEpoch(data)
         };
     }
 
@@ -121,6 +112,7 @@ export class B62RendererStateMachine {
         if (!transaction || this._lifecycle === 'destroyed' || !cues || cues.length === 0) {
             return;
         }
+        this._applyTimelineEpoch(transaction);
         let start = null;
         cues.forEach((cue) => {
             if (Number.isFinite(cue.start) && (start === null || cue.start < start)) {
@@ -131,13 +123,16 @@ export class B62RendererStateMachine {
             return;
         }
 
-        const annotatedCues = cues.map((cue, index) => Object.assign(cue, {
+        const annotatedCues = cues.map((cue, index) => Object.assign({}, cue, {
             key: cue.key + ':event:' + transaction.eventId + ':' + index,
             trackKey: transaction.trackKey,
             eventId: transaction.eventId,
             eventStart: start,
-            resourceScopeKey: transaction.resourceScopeKey
+            resourceScopeKey: cue.resourceScopeKey || transaction.resourceScopeKey
         }));
+        const resourceScopeKeys = Array.from(new Set(annotatedCues
+            .map((cue) => cue.resourceScopeKey)
+            .filter(Boolean)));
 
         // A partial and then complete delivery of one MPU commonly produces the
         // same presentation start. Only the latest delivery is authoritative.
@@ -148,11 +143,66 @@ export class B62RendererStateMachine {
             eventId: transaction.eventId,
             trackKey: transaction.trackKey,
             resourceScopeKey: transaction.resourceScopeKey,
+            resourceScopeKeys: resourceScopeKeys,
             start: start,
             cues: annotatedCues
         });
         this._sortPresentations();
         this._enforceCueLimit();
+    }
+
+    resolveContinuations(transaction, continuations) {
+        if (!transaction || !continuations || continuations.length === 0) {
+            return [];
+        }
+        const previousEpochKey = this._trackEpochs.get(transaction.trackKey);
+        if (transaction.hasExplicitTimelineEpoch &&
+            previousEpochKey && previousEpochKey !== transaction.timelineEpochKey) {
+            return [];
+        }
+        const source = this._latestPresentationForTrack(transaction.trackKey);
+        if (!source) {
+            return [];
+        }
+
+        const resolved = [];
+        const resolvedIds = new Set();
+        continuations.forEach((continuation) => {
+            if (!continuation || !continuation.id || resolvedIds.has(continuation.id)) {
+                return;
+            }
+            for (let i = 0; i < source.cues.length; i++) {
+                const cue = source.cues[i];
+                if (cue.end !== Infinity || !cue.blocks || cue.blocks.length === 0) {
+                    continue;
+                }
+                const blocks = cue.blocks.filter((block) => block && block.xmlId === continuation.id);
+                if (blocks.length === 0) {
+                    continue;
+                }
+
+                let end = continuation.end;
+                if (Number.isFinite(continuation.dur) && !Number.isFinite(end)) {
+                    end = cue.start + continuation.dur;
+                } else if (end === null || end === undefined) {
+                    end = Infinity;
+                }
+                if (Number.isFinite(end) && end <= cue.start) {
+                    end = cue.start + 0.05;
+                }
+
+                resolved.push(Object.assign({}, cue, {
+                    key: 'continuation:' + continuation.id + ':' + cue.key,
+                    end: end,
+                    blocks: blocks,
+                    audios: [],
+                    continuationId: continuation.id
+                }));
+                resolvedIds.add(continuation.id);
+                break;
+            }
+        });
+        return resolved;
     }
 
     activeCues(currentTime) {
@@ -202,6 +252,7 @@ export class B62RendererStateMachine {
                 if (predecessor.cues.every((cue) => cue.end < keepFrom)) {
                     predecessor.cues = [];
                     predecessor.resourceScopeKey = null;
+                    predecessor.resourceScopeKeys = [];
                 }
                 keep.add(predecessor);
             }
@@ -248,9 +299,36 @@ export class B62RendererStateMachine {
     }
 
     referencedResourceScopes() {
-        return new Set(this._presentations
-            .map((presentation) => presentation.resourceScopeKey)
-            .filter(Boolean));
+        const referenced = new Set();
+        this._presentations.forEach((presentation) => {
+            const scopeKeys = presentation.resourceScopeKeys || [presentation.resourceScopeKey];
+            scopeKeys.filter(Boolean).forEach((scopeKey) => referenced.add(scopeKey));
+        });
+        return referenced;
+    }
+
+    _latestPresentationForTrack(track) {
+        let latest = null;
+        this._presentations.forEach((presentation) => {
+            if (presentation.trackKey === track && (!latest || presentation.eventId > latest.eventId)) {
+                latest = presentation;
+            }
+        });
+        return latest;
+    }
+
+    _applyTimelineEpoch(transaction) {
+        if (!transaction.hasExplicitTimelineEpoch) {
+            return;
+        }
+        const previousEpochKey = this._trackEpochs.get(transaction.trackKey);
+        if (previousEpochKey && previousEpochKey !== transaction.timelineEpochKey) {
+            this._presentations = this._presentations.filter((presentation) =>
+                presentation.trackKey !== transaction.trackKey
+            );
+            this._clearTimelineOffsetsForTrack(transaction.trackKey);
+        }
+        this._trackEpochs.set(transaction.trackKey, transaction.timelineEpochKey);
     }
 
     _sortPresentations() {

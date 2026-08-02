@@ -45,6 +45,36 @@ clearState.commitPresentation(clearState.beginPush({...captionTrack, mpuSequence
 assert.equal(clearState.activeCues(5.02)[0].clear, true);
 assert.deepEqual(clearState.activeCues(6), []);
 
+const continuationState = new B62RendererStateMachine();
+continuationState.commitPresentation(
+    continuationState.beginPush({packetId: 1, mpuSequenceNumber: 1}),
+    [Object.assign(cue('continued-source', 10, Infinity), {
+        blocks: [{xmlId: 'p4', spans: [{text: 'old content'}]}]
+    })]
+);
+const continuationTransaction = continuationState.beginPush({packetId: 1, mpuSequenceNumber: 2});
+const continued = continuationState.resolveContinuations(continuationTransaction, [{id: 'p4', end: 50, dur: null}]);
+assert.equal(continued.length, 1);
+assert.equal(continued[0].end, 50);
+assert.equal(continued[0].blocks[0].spans[0].text, 'old content');
+assert.equal(continued[0].resourceScopeKey, 'packet:1:mpu:1');
+continuationState.commitPresentation(continuationTransaction, continued);
+assert.equal(continuationState.activeCues(20)[0].blocks[0].spans[0].text, 'old content');
+assert.deepEqual(Array.from(continuationState.referencedResourceScopes()), ['packet:1:mpu:1']);
+assert.deepEqual(continuationState.activeCues(51), []);
+
+const durationContinuationState = new B62RendererStateMachine();
+durationContinuationState.commitPresentation(
+    durationContinuationState.beginPush({packetId: 2, mpuSequenceNumber: 1}),
+    [Object.assign(cue('duration-source', 12, Infinity), {blocks: [{xmlId: 'duration'}]})]
+);
+const durationTransaction = durationContinuationState.beginPush({packetId: 2, mpuSequenceNumber: 2});
+const durationContinued = durationContinuationState.resolveContinuations(
+    durationTransaction,
+    [{id: 'duration', end: Infinity, dur: 8}]
+);
+assert.equal(durationContinued[0].end, 20);
+
 const replacementState = new B62RendererStateMachine();
 replacementState.commitPresentation(replacementState.beginPush(captionTrack), [cue('partial', 1, 5)]);
 replacementState.commitPresentation(replacementState.beginPush(captionTrack), [cue('complete', 1, 5)]);
@@ -66,6 +96,14 @@ epochState.commitPresentation(
     [cue('new-epoch', 0, 2)]
 );
 assert.deepEqual(epochState.activeCues(1).map((item) => item.key), ['new-epoch:event:2:0']);
+
+const abortedEpochState = new B62RendererStateMachine();
+abortedEpochState.commitPresentation(
+    abortedEpochState.beginPush({packetId: 3, videoRawDtsBase: 1000, videoDtsBase: 0}),
+    [cue('valid-epoch', 0, 10)]
+);
+abortedEpochState.beginPush({packetId: 3, videoRawDtsBase: 2000, videoDtsBase: 0});
+assert.deepEqual(abortedEpochState.activeCues(1).map((item) => item.key), ['valid-epoch:event:1:0']);
 
 const resourceState = new B62RendererStateMachine();
 resourceState.commitPresentation(resourceState.beginPush({packetId: 1, mpuSequenceNumber: 1}), [cue('one', 0, 4)]);

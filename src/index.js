@@ -8,7 +8,7 @@ import {
     mergeFontFamilyStacks
 } from './utils/style.js';
 import {subtitleMediaTimeSeconds} from './utils/cues.js';
-import {findTTMLMinStart, parseARIBTTML} from './parser.js';
+import {findTTMLMinStart, parseARIBTTML, parseARIBTTMLDocument} from './parser.js';
 import {renderTTMLCueDOM} from './renderer.js';
 import {B62RendererStateMachine, B62StateKeys} from './utils/state.js';
 import {collectPushResultFontFaces} from './utils/result.js';
@@ -188,12 +188,20 @@ class B62TTMLRenderer {
         const arrivalAligned = false;
         const timelineOffset = this._resolveTimelineOffset(data, text, effectiveBasePts, this._timelineAnchor(data));
 
-        const cues = parseARIBTTML(text, effectiveBasePts, currentTime, arrivalAligned, {
+        const parsedDocument = parseARIBTTMLDocument(text, effectiveBasePts, currentTime, arrivalAligned, {
             resourceResolver: resources,
             timelineOffset: timelineOffset
         });
+        if (parsedDocument.kind === 'invalid') {
+            this._releaseUnusedResourceScopes();
+            return this._buildPushResult(data, text, [], basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset, 'invalid');
+        }
+
+        const continuedCues = this._isLive ?
+            this._state.resolveContinuations(transaction, parsedDocument.continuations) : [];
+        const cues = parsedDocument.cues.concat(continuedCues);
         let presentationCues;
-        if (cues.length === 0) {
+        if (parsedDocument.kind === 'clear' || cues.length === 0) {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
             presentationCues = [{
                 key: 'clear:' + start,
@@ -211,7 +219,7 @@ class B62TTMLRenderer {
         this._pruneCues(currentTime);
         this._releaseUnusedResourceScopes();
         this.render();
-        return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset);
+        return this._buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset, parsedDocument.kind);
     }
 
     get eventCount() {
@@ -281,15 +289,15 @@ class B62TTMLRenderer {
             data.subtitleTimingMode === 2 &&
             Number.isFinite(data.subtitleReferenceStartMediaTime)) {
             const referenceOffset = data.subtitleReferenceStartMediaTime / 1000;
-            if (this._isLive && minStart !== null && Number.isFinite(data.videoMediaDts)) {
+            if (this._isLive) {
                 const key = this._state.timelineOffsetKey(data, 'live-reference');
                 let liveOffset = this._state.getTimelineOffset(key);
-                if (liveOffset === null) {
+                if (liveOffset === null && minStart !== null && Number.isFinite(data.videoMediaDts)) {
                     const staleBy = (data.videoMediaDts / 1000) - (minStart + referenceOffset);
                     liveOffset = Math.max(this._liveTimingDelay, staleBy > 1 ? staleBy - 0.3 : 0);
                     this._state.setTimelineOffset(key, liveOffset);
                 }
-                return referenceOffset + liveOffset;
+                return referenceOffset + (liveOffset === null ? 0 : liveOffset);
             }
             return referenceOffset;
         }
@@ -299,12 +307,11 @@ class B62TTMLRenderer {
             return basePts;
         }
 
-        if (minStart === null) {
-            return null;
-        }
-
         const key = this._state.timelineOffsetKey(data);
         let timelineOffset = this._state.getTimelineOffset(key);
+        if (minStart === null) {
+            return timelineOffset;
+        }
         if (timelineOffset === null) {
             timelineOffset = (basePts !== null ? basePts : fallbackAnchor) - minStart;
             this._state.setTimelineOffset(key, timelineOffset);
@@ -320,7 +327,7 @@ class B62TTMLRenderer {
         this._state.prune(currentTime);
     }
 
-    _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset) {
+    _buildPushResult(data, text, cues, basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset, documentKind) {
         const audios = [];
         cues.forEach((cue) => {
             if (cue.audios && cue.audios.length > 0) {
@@ -332,6 +339,7 @@ class B62TTMLRenderer {
         return {
             eventCount: this._state.eventCount,
             packetId: data && data.packetId,
+            documentKind: documentKind || (text ? 'presentation' : 'none'),
             cueCount: cues.length,
             cues: cues,
             audioCount: audios.length,

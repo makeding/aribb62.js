@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>aribb62.js browser tests</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import {parseARIBTTMLDocument} from '../src/parser.js';
+import {B62TTMLRenderer} from '../src/index.js';
+
+const assert = (condition, message) => {
+    if (!condition) {
+        throw new Error(message);
+    }
+};
+
+const invalid = parseARIBTTMLDocument('<tt><broken></tt>', 0, 0, false);
+assert(invalid.kind === 'invalid', 'malformed XML must not become a clear command');
+
+const clear = parseARIBTTMLDocument(
+    '<tt xmlns="http://www.w3.org/ns/ttml">\n</tt>',
+    0,
+    0,
+    false
+);
+assert(clear.kind === 'clear', 'an empty tt element must be a clear command');
+
+const emptyPresentation = parseARIBTTMLDocument(
+    '<tt xmlns="http://www.w3.org/ns/ttml"><head/><body/></tt>',
+    0,
+    0,
+    false
+);
+assert(emptyPresentation.kind === 'presentation', 'a structured empty document is not the B62 empty-tt command');
+
+const sourceText = `
+<tt xmlns="http://www.w3.org/ns/ttml" tts:extent="3840px 2160px"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling">
+  <head><layout><region xml:id="r" tts:origin="0px 0px" tts:extent="3840px 2160px"/></layout></head>
+  <body><div><p xml:id="p4" region="r" begin="00:00:10.000" end="indefinite"><span>old content</span></p></div></body>
+</tt>`;
+const source = parseARIBTTMLDocument(sourceText, 0, 0, false);
+assert(source.cues.length === 1 && source.cues[0].end === Infinity, 'source indefinite cue');
+assert(source.cues[0].blocks[0].xmlId === 'p4', 'p xml:id must survive parsing');
+
+const continuationText = `
+<tt xmlns="http://www.w3.org/ns/ttml">
+  <body><div><p xml:id="p4" begin="indefinite" end="00:00:50.000"><span>replacement must be ignored</span></p></div></body>
+</tt>`;
+const continuation = parseARIBTTMLDocument(continuationText, 0, 20, false, {timelineOffset: 2});
+assert(continuation.cues.length === 0, 'continuation node must not become a new visual cue');
+assert(continuation.continuations[0].end === 52, 'continuation end must use the track timeline offset');
+
+const media = document.createElement('video');
+Object.defineProperty(media, 'currentTime', {value: 20, writable: true});
+const overlay = document.createElement('div');
+document.body.append(media, overlay);
+const renderer = new B62TTMLRenderer({mediaElement: media, overlayElement: overlay, isLive: true});
+renderer.push({packetId: 1, mpuSequenceNumber: 1, text: sourceText});
+const continuedResult = renderer.push({packetId: 1, mpuSequenceNumber: 2, text: continuationText});
+assert(continuedResult.cues.length === 1, 'renderer must resolve a live continuation');
+assert(continuedResult.cues[0].blocks[0].spans[0].text === 'old content', 'old DOM content must win');
+renderer.push({packetId: 1, mpuSequenceNumber: 3, text: '<tt><broken></tt>'});
+assert(renderer._state.activeCues(20).length === 1, 'malformed XML must leave the active presentation intact');
+renderer.destroy();
+
+document.getElementById('result').textContent = 'PASS';
+</script>

@@ -41,7 +41,7 @@ export function findTTMLMinStart(text) {
         if (start === null && timingNode) {
             start = parseTTMLTime(getTTMLAttr(timingNode, 'begin'));
         }
-        if (start !== null && (minStart === null || start < minStart)) {
+        if (Number.isFinite(start) && (minStart === null || start < minStart)) {
             minStart = start;
         }
     };
@@ -56,15 +56,22 @@ export function findTTMLMinStart(text) {
 }
 
 export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, options) {
+    return parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlignment, options).cues;
+}
+
+export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlignment, options) {
     options = options || {};
     const doc = new DOMParser().parseFromString(text, 'application/xml');
     if (doc.getElementsByTagName('parsererror').length > 0 || !doc.documentElement || localName(doc.documentElement) !== 'tt') {
-        return [];
+        return {kind: 'invalid', cues: [], continuations: []};
     }
 
     const tt = doc.documentElement;
+    if (isEmptyTTMLDocument(tt)) {
+        return {kind: 'clear', cues: [], continuations: []};
+    }
     if (!firstChildByLocalName(tt, 'body')) {
-        return [];
+        return {kind: 'presentation', cues: [], continuations: []};
     }
 
     const plane = parseTTMLPlane(tt);
@@ -76,12 +83,14 @@ export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, op
     const body = firstChildByLocalName(tt, 'body');
     const pNodes = descendantsByLocalName(body, 'p');
     const rawCues = [];
+    const rawContinuations = [];
     const presentationGroups = new Map();
     let nextPresentationGroupId = 0;
 
     pNodes.forEach((pNode, index) => {
         const timingNode = nearestTimedNode(pNode);
-        let rawStart = parseTTMLTime(getTTMLAttr(pNode, 'begin'));
+        const beginValue = getTTMLAttr(pNode, 'begin');
+        let rawStart = parseTTMLTime(beginValue);
         let rawEnd = parseTTMLTime(getTTMLAttr(pNode, 'end'));
         let rawDur = parseTTMLTime(getTTMLAttr(pNode, 'dur'));
         if (rawStart === null && timingNode) {
@@ -95,6 +104,14 @@ export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, op
         }
         if (rawEnd === null && rawDur !== null && rawStart !== null) {
             rawEnd = rawDur === Infinity ? Infinity : rawStart + rawDur;
+        }
+
+        if (String(beginValue || '').trim() === 'indefinite') {
+            const id = getXMLId(pNode);
+            if (id) {
+                rawContinuations.push({id: id, rawEnd: rawEnd, rawDur: rawDur});
+            }
+            return;
         }
 
         const regionId = nearestTTMLAttr(pNode, 'region');
@@ -113,6 +130,7 @@ export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, op
             rawStart: rawStart,
             rawEnd: rawEnd,
             block: hasVisual ? {
+                xmlId: getXMLId(pNode) || '',
                 groupKey: ttmlPresentationGroupKey(pNode, presentationGroups, () => nextPresentationGroupId++),
                 region: region,
                 style: blockStyle,
@@ -147,10 +165,6 @@ export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, op
         });
     });
 
-    if (rawCues.length === 0) {
-        return [];
-    }
-
     let minStart = null;
     rawCues.forEach((cue) => {
         if (cue.rawStart !== null && (minStart === null || cue.rawStart < minStart)) {
@@ -165,7 +179,15 @@ export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, op
         startOffset = basePts - minStart;
     }
 
-    return groupRawTTMLCues(rawCues).map((raw) => {
+    if (rawCues.length === 0) {
+        return {
+            kind: 'presentation',
+            cues: [],
+            continuations: offsetTTMLContinuations(rawContinuations, startOffset)
+        };
+    }
+
+    const cues = groupRawTTMLCues(rawCues).map((raw) => {
         const start = raw.rawStart !== null ? raw.rawStart + startOffset : (basePts !== null ? basePts : currentTime);
         let end = raw.rawEnd !== null ? raw.rawEnd + startOffset : start + 5;
         if (end <= start) {
@@ -184,6 +206,37 @@ export function parseARIBTTML(text, basePts, currentTime, forceBaseAlignment, op
             blocks: raw.blocks
         };
     });
+    return {
+        kind: 'presentation',
+        cues: cues,
+        continuations: offsetTTMLContinuations(rawContinuations, startOffset)
+    };
+}
+
+function isEmptyTTMLDocument(tt) {
+    if (!tt || !tt.childNodes) {
+        return false;
+    }
+    for (let i = 0; i < tt.childNodes.length; i++) {
+        const child = tt.childNodes[i];
+        if (child.nodeType === Node.ELEMENT_NODE) {
+            return false;
+        }
+        if ((child.nodeType === Node.TEXT_NODE || child.nodeType === Node.CDATA_SECTION_NODE) &&
+            String(child.nodeValue || '').trim() !== '') {
+            return false;
+        }
+    }
+    return true;
+}
+
+function offsetTTMLContinuations(continuations, offset) {
+    return continuations.map((continuation) => ({
+        id: continuation.id,
+        end: continuation.rawEnd === null || continuation.rawEnd === Infinity ?
+            continuation.rawEnd : continuation.rawEnd + offset,
+        dur: continuation.rawDur
+    }));
 }
 
 function ttmlPresentationGroupKey(node, groups, nextId) {
