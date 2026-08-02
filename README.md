@@ -10,7 +10,7 @@ Serve this directory with any static file server and open `/demo/`.
 
 Implemented renderer basics:
 
-- TTML timing, regions, color, font size, line height, and display alignment
+- TTML timing, regions, color, one- and two-value font size, line height, and display alignment
 - ARIB-TTML `writingMode` mapping for horizontal and vertical captions
 - ARIB-TTML `arib-tt:ruby` spans linked to a base element by `xml:id`
 - `smpte:backgroundImage` with embedded `smpte:image` or same-MPU `subt://n` resources
@@ -19,6 +19,15 @@ Implemented renderer basics:
 - `dur` and `indefinite` timing for live-mode continued presentation
 - `arib-tt:audio` metadata extraction (`romsound://n` and `subt://n` are exposed, playback is left to the host)
 - UTF-8 text with LF/TAB preserved for browser `pre-wrap` rendering
+
+Document state follows the B62 presentation rules rather than treating every parsed cue independently:
+
+- malformed XML is ignored and does not clear the active presentation
+- an empty `<tt></tt>` is recognized as the explicit clear command
+- in live mode, `end="indefinite"` content is continued only by a following `begin="indefinite"` element with the same `xml:id`
+- continued content keeps the old DOM/style and same-MPU resource scope while accepting the new end time
+
+`arib-tt:border` is rendered as the four-sided enclosure around a character sequence. Viewer readability stroke (`forceStrokeColor` / `fallbackStrokeColor`) is a separate, non-ARIB presentation option.
 
 ```js
 const renderer = new aribb62js.B62TTMLRenderer({

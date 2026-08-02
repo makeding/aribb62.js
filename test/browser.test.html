@@ -72,5 +72,22 @@ renderer.push({packetId: 1, mpuSequenceNumber: 3, text: '<tt><broken></tt>'});
 assert(renderer._state.activeCues(20).length === 1, 'malformed XML must leave the active presentation intact');
 renderer.destroy();
 
+const verticalText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-ttml/v1_0">
+  <head><layout><region xml:id="v" tts:writingMode="tbrl" tts:origin="0px 0px" tts:extent="400px 1000px"/></layout></head>
+  <body><div><p region="v" begin="0s" end="10s" arib-tt:marquee="slide forward fast 1">vertical</p></div></body>
+</tt>`;
+const verticalMedia = document.createElement('video');
+const verticalOverlay = document.createElement('div');
+document.body.append(verticalMedia, verticalOverlay);
+const verticalRenderer = new B62TTMLRenderer({mediaElement: verticalMedia, overlayElement: verticalOverlay});
+verticalRenderer.push({packetId: 2, text: verticalText});
+assert(
+    verticalOverlay.querySelector('.ttml-subtitle-line').style.animationName === 'aribb62-marquee-slide-y-forward',
+    'region writing mode must select the vertical marquee axis'
+);
+verticalRenderer.destroy();
+
 document.getElementById('result').textContent = 'PASS';
 </script>

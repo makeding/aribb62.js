@@ -103,7 +103,11 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         line.style.width = 'auto';
         line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
         line.style.tabSize = '1em';
-        applyTTMLStyle(line, block.contentStyle || {}, scale);
+        const lineStyle = Object.assign({}, block.contentStyle || {});
+        if (!lineStyle.writingMode && block.style.writingMode) {
+            lineStyle.writingMode = block.style.writingMode;
+        }
+        applyTTMLStyle(line, lineStyle, scale);
         const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
         const renderedSpans = [];
         block.spans.forEach((span) => {

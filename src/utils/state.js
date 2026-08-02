@@ -112,7 +112,6 @@ export class B62RendererStateMachine {
         if (!transaction || this._lifecycle === 'destroyed' || !cues || cues.length === 0) {
             return;
         }
-        this._applyTimelineEpoch(transaction);
         let start = null;
         cues.forEach((cue) => {
             if (Number.isFinite(cue.start) && (start === null || cue.start < start)) {
@@ -122,6 +121,7 @@ export class B62RendererStateMachine {
         if (start === null) {
             return;
         }
+        this._applyTimelineEpoch(transaction);
 
         const annotatedCues = cues.map((cue, index) => Object.assign({}, cue, {
             key: cue.key + ':event:' + transaction.eventId + ':' + index,
