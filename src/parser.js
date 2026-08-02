@@ -119,7 +119,7 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
         const contentStyle = collectInheritedTTMLStyle(pNode, styles);
         const blockStyle = Object.assign({}, region && region.style ? region.style : {}, contentStyle);
         applyTTMLResourceStyle(blockStyle, embeddedImages, options.resourceResolver);
-        const spans = parseTTMLSpans(pNode, styles, inheritedInlineTTMLStyle(blockStyle));
+        const spans = parseTTMLSpans(pNode, styles, inheritedInlineTTMLStyle(blockStyle), regions);
         const audios = collectTTMLAudios(pNode, rawStart, rawEnd, rawDur, options.resourceResolver);
         const hasVisual = spans.length > 0 || !!blockStyle.backgroundImageUrl;
         if (!hasVisual && audios.length === 0) {
@@ -136,7 +136,9 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
                 region: region,
                 style: blockStyle,
                 contentStyle: contentStyle,
-                spans: spans
+                spans: spans,
+                _rubyBaseNodes: collectTTMLBlockIdentityNodes(pNode),
+                _rubySourceNode: nearestTTMLBlockRubyNode(pNode)
             } : null,
             audios: audios
         });
@@ -166,6 +168,8 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
             audios: [audio]
         });
     });
+
+    resolveTTMLBlockRubyAssociations(rawCues);
 
     let minStart = null;
     rawCues.forEach((cue) => {
@@ -260,9 +264,9 @@ function ttmlPresentationGroupKey(node, groups, nextId) {
     return groups.get(groupNode);
 }
 
-function parseTTMLSpans(pNode, styles, inheritedStyle) {
+function parseTTMLSpans(pNode, styles, inheritedStyle, regions) {
     const spans = [];
-    appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans);
+    appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans, regions || {}, null);
     return resolveTTMLRubySpans(spans);
 }
 
@@ -279,13 +283,15 @@ function inheritedInlineTTMLStyle(style) {
         'borderLeft',
         'borderRight',
         'displayAlign',
+        'extent',
         'marquee',
-        'opacity'
+        'opacity',
+        'origin'
     ].forEach((name) => delete result[name]);
     return result;
 }
 
-function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {
+function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, regions, inheritedRegion) {
     if (!parentNode || !parentNode.childNodes) {
         return;
     }
@@ -295,7 +301,7 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {
         if (child.nodeType === Node.TEXT_NODE || child.nodeType === Node.CDATA_SECTION_NODE) {
             const text = normalizeTTMLText(child.nodeValue || '');
             if (text !== '') {
-                spans.push({text: text, style: Object.assign({}, inheritedStyle)});
+                spans.push({text: text, style: Object.assign({}, inheritedStyle), region: inheritedRegion});
             }
             continue;
         }
@@ -305,21 +311,25 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {
 
         const name = localName(child);
         if (name === 'br') {
-            spans.push({text: '\n', style: Object.assign({}, inheritedStyle)});
+            spans.push({text: '\n', style: Object.assign({}, inheritedStyle), region: inheritedRegion});
             continue;
         }
         if (name !== 'span') {
-            appendTTMLInlineSpans(child, styles, inheritedStyle, spans);
+            appendTTMLInlineSpans(child, styles, inheritedStyle, spans, regions, inheritedRegion);
             continue;
         }
 
-        const style = mergeTTMLStyleRefs(child, styles, inheritedStyle);
+        const regionId = getTTMLAttr(child, 'region');
+        const region = regionId && regions[regionId] ? regions[regionId] : inheritedRegion;
+        const regionStyle = region && region.style ?
+            Object.assign({}, inheritedStyle, inheritedInlineTTMLStyle(region.style)) : inheritedStyle;
+        const style = mergeTTMLStyleRefs(child, styles, regionStyle);
         const beforeLength = spans.length;
-        appendTTMLInlineSpans(child, styles, style, spans);
+        appendTTMLInlineSpans(child, styles, style, spans, regions, region);
         if (spans.length === beforeLength) {
             const text = normalizeTTMLText(child.textContent || '');
             if (text !== '') {
-                spans.push({text: text, style: style});
+                spans.push({text: text, style: style, region: region});
             }
         }
 
@@ -328,32 +338,155 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {
         for (let j = beforeLength; j < spans.length; j++) {
             if (id && !spans[j].id) {
                 spans[j].id = id;
+                spans[j]._idSourceNode = child;
             }
             if (rubyTargetId && !spans[j].rubyTargetId) {
                 spans[j].rubyTargetId = rubyTargetId;
+                spans[j]._rubySourceNode = child;
             }
         }
     }
 }
 
 function resolveTTMLRubySpans(spans) {
-    const byId = {};
+    const byId = new Map();
     spans.forEach((span) => {
-        if (span.id && !span.rubyTargetId && !byId[span.id]) {
-            byId[span.id] = span;
+        if (!span.id || span.rubyTargetId) {
+            return;
+        }
+        const existing = byId.get(span.id);
+        if (!existing) {
+            byId.set(span.id, {sourceNode: span._idSourceNode, spans: [span]});
+        } else if (existing.sourceNode === span._idSourceNode) {
+            existing.spans.push(span);
         }
     });
 
-    return spans.filter((span) => {
+    const annotations = new Map();
+    spans.forEach((span) => {
         if (!span.rubyTargetId) {
-            return true;
+            return;
         }
-        const base = byId[span.rubyTargetId];
-        if (!base) {
-            return true;
+        const sourceNode = span._rubySourceNode || span;
+        let annotation = annotations.get(sourceNode);
+        if (!annotation) {
+            annotation = {
+                id: span.id || '',
+                targetId: span.rubyTargetId,
+                spans: [],
+                text: ''
+            };
+            annotations.set(sourceNode, annotation);
         }
-        base.rubyText = span.text;
-        return false;
+        annotation.spans.push(span);
+        annotation.text += span.text;
+    });
+
+    annotations.forEach((annotation) => {
+        const base = byId.get(annotation.targetId);
+        if (!base || base.sourceNode === annotation.spans[0]._rubySourceNode) {
+            return;
+        }
+        const metadata = {
+            id: annotation.id,
+            targetId: annotation.targetId,
+            text: annotation.text
+        };
+        base.spans[0].rubyAnnotations = base.spans[0].rubyAnnotations || [];
+        base.spans[0].rubyAnnotations.push(metadata);
+        annotation.spans.forEach((span) => {
+            span.rubyResolved = true;
+        });
+    });
+
+    spans.forEach((span) => {
+        delete span._idSourceNode;
+        delete span._rubySourceNode;
+    });
+    return spans;
+}
+
+function collectTTMLBlockIdentityNodes(pNode) {
+    const nodes = [];
+    let current = pNode;
+    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
+        const name = localName(current);
+        if ((name === 'p' || name === 'div') && getXMLId(current)) {
+            nodes.push(current);
+        }
+        current = current.parentNode;
+    }
+    return nodes;
+}
+
+function nearestTTMLBlockRubyNode(pNode) {
+    let current = pNode;
+    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
+        const name = localName(current);
+        if ((name === 'p' || name === 'div') && getARIBTTMLAttr(current, 'ruby')) {
+            return current;
+        }
+        current = current.parentNode;
+    }
+    return null;
+}
+
+function resolveTTMLBlockRubyAssociations(rawCues) {
+    const targets = new Map();
+    const annotations = new Map();
+    rawCues.forEach((cue) => {
+        const block = cue.block;
+        if (!block) {
+            return;
+        }
+        (block._rubyBaseNodes || []).forEach((node) => {
+            const id = getXMLId(node);
+            const existing = targets.get(id);
+            if (!existing) {
+                targets.set(id, {sourceNode: node, blocks: [block]});
+            } else if (existing.sourceNode === node) {
+                existing.blocks.push(block);
+            }
+        });
+        if (block._rubySourceNode) {
+            let annotation = annotations.get(block._rubySourceNode);
+            if (!annotation) {
+                annotation = {
+                    sourceNode: block._rubySourceNode,
+                    targetId: getARIBTTMLAttr(block._rubySourceNode, 'ruby'),
+                    blocks: []
+                };
+                annotations.set(block._rubySourceNode, annotation);
+            }
+            annotation.blocks.push(block);
+        }
+    });
+
+    annotations.forEach((annotation) => {
+        const target = targets.get(annotation.targetId);
+        if (!target || target.sourceNode === annotation.sourceNode) {
+            return;
+        }
+        const metadata = {
+            id: getXMLId(annotation.sourceNode) || '',
+            targetId: annotation.targetId,
+            element: localName(annotation.sourceNode),
+            text: annotation.blocks.map((block) => block.spans.map((span) => span.text).join('')).join('\n')
+        };
+        target.blocks[0].rubyAnnotations = target.blocks[0].rubyAnnotations || [];
+        target.blocks[0].rubyAnnotations.push(metadata);
+        annotation.blocks.forEach((block) => {
+            block.rubyTargetId = annotation.targetId;
+            block.rubyResolved = true;
+        });
+    });
+
+    rawCues.forEach((cue) => {
+        if (!cue.block) {
+            return;
+        }
+        delete cue.block._rubyBaseNodes;
+        delete cue.block._rubySourceNode;
     });
 }
 
@@ -377,8 +510,8 @@ function collectTTMLRegions(doc, styles, plane) {
         }
         const style = mergeTTMLStyleRefs(regionNode, styles, {});
         regions[id] = {
-            origin: parseTTMLLengthPair(getTTMLAttr(regionNode, 'origin'), plane),
-            extent: parseTTMLLengthPair(getTTMLAttr(regionNode, 'extent'), plane),
+            origin: parseTTMLLengthPair(getTTMLAttr(regionNode, 'origin') || style.origin, plane),
+            extent: parseTTMLLengthPair(getTTMLAttr(regionNode, 'extent') || style.extent, plane),
             displayAlign: getTTMLAttr(regionNode, 'displayAlign') || style.displayAlign || 'before',
             style: style
         };
@@ -417,7 +550,7 @@ function mergeTTMLStyleRefs(node, styles, base) {
         'fontSize', 'lineHeight', 'fontWeight', 'fontStyle', 'fontFamily',
         'color', 'backgroundColor', 'displayAlign', 'textAlign',
         'textDecoration', 'textShadow', 'backgroundImage', 'writingMode',
-        'direction', 'opacity'
+        'direction', 'extent', 'opacity', 'origin', 'textOutline'
     ];
     attrs.forEach((name) => {
         const value = getTTMLAttr(node, name);

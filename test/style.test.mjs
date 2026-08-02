@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import {applyARIBMarquee, applyTTMLBorder} from '../src/utils/style.js';
+import {
+    applyARIBMarquee,
+    applyTTMLBorder,
+    keyframeStyleToCSS,
+    parseARIBAnimation,
+    parseTTMLTextStroke
+} from '../src/utils/style.js';
 
 const borderElement = {style: {}};
 applyTTMLBorder(borderElement, {
@@ -22,5 +28,36 @@ applyARIBMarquee(horizontalMarquee, 'alternate reverse normal infinite', 'lrtb')
 assert.equal(horizontalMarquee.style.animationName, 'aribb62-marquee-alternate-x-reverse');
 assert.equal(horizontalMarquee.style.animationIterationCount, 'infinite');
 assert.equal(horizontalMarquee.style.animationDirection, 'normal');
+
+assert.deepEqual(parseTTMLTextStroke('#ff0000 8px 2px', 0.5), {
+    width: 4,
+    blur: 1,
+    color: '#ff0000'
+});
+assert.deepEqual(parseTTMLTextStroke('#00ff00ff 2px 0px', 0.25), {
+    width: 0.5,
+    blur: 0,
+    color: 'rgba(0, 255, 0, 1)'
+});
+assert.deepEqual(parseTTMLTextStroke('2px', 0.25), {
+    width: 0.5,
+    blur: 0,
+    color: 'currentColor'
+});
+assert.equal(parseTTMLTextStroke('none', 1), null);
+assert.equal(
+    parseARIBAnimation('scroll 1000ms linear 0ms 1 normal'),
+    'scroll 1000ms linear 0ms 1 normal both'
+);
+assert.deepEqual(
+    keyframeStyleToCSS({
+        origin: '340px 40px',
+        extent: '300px 100px',
+        fontSize: '46px'
+    }, 0.25),
+    [
+        'transform: translate(calc(85px - var(--aribb62-origin-x, 0px)), calc(10px - var(--aribb62-origin-y, 0px)))'
+    ]
+);
 
 console.log('ARIB border and marquee mapping: ok');

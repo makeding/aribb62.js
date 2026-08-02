@@ -179,6 +179,11 @@ class B62TTMLRenderer {
         const text = this._decodeText(data);
         const resources = this._prepareResourceContext(data, transaction.resourceScopeKey);
 
+        if (text === null) {
+            this._releaseUnusedResourceScopes();
+            return this._buildPushResult(data, '', [], null, null, false, resources, null, 'invalid');
+        }
+
         if (!text) {
             this._releaseUnusedResourceScopes();
             return this._buildPushResult(data, '', [], null, null, false, resources);
@@ -264,9 +269,9 @@ class B62TTMLRenderer {
         }
 
         try {
-            return new TextDecoder('utf-8').decode(data.data);
+            return new TextDecoder('utf-8', {fatal: true}).decode(data.data);
         } catch (e) {
-            return '';
+            return null;
         }
     }
 

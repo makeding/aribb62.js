@@ -12,6 +12,7 @@ import {
     mapTextAlignItems,
     mapWritingMode,
     parseARIBAnimation,
+    parseTTMLTextStroke,
     scaleTTMLShadow
 } from './utils/style.js';
 import {getMediaContentViewport} from './utils/viewport.js';
@@ -95,7 +96,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.color = '#fff';
         blockElement.style.whiteSpace = 'pre-wrap';
         const hasMarquee = !!block.style.marquee || block.spans.some((span) => span.style && span.style.marquee);
-        blockElement.style.overflow = hasMarquee ? 'hidden' : 'visible';
+        blockElement.style.overflow = 'hidden';
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.fontFamily = styleOptions.normalFont;
@@ -143,6 +144,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         line.style.width = 'auto';
         line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
         line.style.tabSize = '1em';
+        applyTTMLRegionOriginVariables(line, region, scale);
         const lineStyle = Object.assign({}, block.contentStyle || {});
         if (!lineStyle.writingMode && block.style.writingMode) {
             lineStyle.writingMode = block.style.writingMode;
@@ -151,7 +153,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
         const renderedSpans = [];
         block.spans.forEach((span) => {
-            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces);
+            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces, region);
             line.appendChild(element);
             renderedSpans.push({
                 element: element,
@@ -291,7 +293,7 @@ function clearElementBackgrounds(element) {
     });
 }
 
-function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
+function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion) {
     const fontWidthRatio = resolveTTMLFontWidthRatio(span.style);
     if (span.rubyText) {
         const rubyElement = document.createElement('ruby');
@@ -309,11 +311,13 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
             applyViewerStyle(wrapper, styleOptions, scale);
             applyFontFaceStack(wrapper, fontFaces, (span.text || '') + (span.rubyText || ''));
             applyTTMLFontWidth(wrapper, rubyElement, fontWidthRatio);
+            applyTTMLSpanRegion(wrapper, span.region, parentRegion, scale);
             return wrapper;
         }
         applyTTMLStyle(rubyElement, span.style, scale);
         applyViewerStyle(rubyElement, styleOptions, scale);
         applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
+        applyTTMLSpanRegion(rubyElement, span.region, parentRegion, scale);
         return rubyElement;
     }
 
@@ -328,7 +332,34 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
     } else {
         appendTTMLTextWithSVGGlyphs(spanElement, span.text, fontFaces);
     }
+    applyTTMLSpanRegion(spanElement, span.region, parentRegion, scale);
     return spanElement;
+}
+
+function applyTTMLRegionOriginVariables(element, region, scale) {
+    if (!element || !region || !region.origin) {
+        return;
+    }
+    element.style.setProperty('--aribb62-origin-x', (region.origin[0] * scale) + 'px');
+    element.style.setProperty('--aribb62-origin-y', (region.origin[1] * scale) + 'px');
+}
+
+function applyTTMLSpanRegion(element, region, parentRegion, scale) {
+    if (!element || !region) {
+        return;
+    }
+    const origin = region.origin || [0, 0];
+    const parentOrigin = parentRegion && parentRegion.origin ? parentRegion.origin : [0, 0];
+    element.style.position = 'absolute';
+    element.style.display = 'block';
+    element.style.left = ((origin[0] - parentOrigin[0]) * scale) + 'px';
+    element.style.top = ((origin[1] - parentOrigin[1]) * scale) + 'px';
+    element.style.overflow = 'hidden';
+    if (region.extent) {
+        element.style.width = (region.extent[0] * scale) + 'px';
+        element.style.height = (region.extent[1] * scale) + 'px';
+    }
+    applyTTMLRegionOriginVariables(element, region, scale);
 }
 
 function resolveTTMLFontWidthRatio(style) {
@@ -411,6 +442,24 @@ function applyTTMLStyle(element, style, scale, options) {
     if (style.textShadow) {
         element.style.textShadow = scaleTTMLShadow(style.textShadow, scale);
     }
+    if (style.textOutline) {
+        element.style.setProperty('--aribb62-explicit-outline', '1');
+        const stroke = parseTTMLTextStroke(style.textOutline, scale);
+        if (stroke) {
+            element.style.webkitTextStroke = stroke.width + 'px ' + stroke.color;
+            element.style.paintOrder = 'stroke fill';
+            element.style.setProperty('--aribb62-stroke-color', stroke.color);
+            element.style.setProperty('--aribb62-stroke-width', stroke.width + 'px');
+            if (stroke.blur > 0) {
+                const blurShadow = '0 0 ' + stroke.blur + 'px ' + stroke.color;
+                element.style.textShadow = element.style.textShadow && element.style.textShadow !== 'none' ?
+                    element.style.textShadow + ', ' + blurShadow : blurShadow;
+            }
+        } else {
+            element.style.webkitTextStroke = '0px transparent';
+            element.style.setProperty('--aribb62-stroke-width', '0px');
+        }
+    }
     if (style.letterSpacing) {
         const spacing = parseTTMLLength(style.letterSpacing, 3840);
         if (spacing !== null) {
@@ -451,7 +500,9 @@ function applyFallbackReadableTextStyle(element, options, scale) {
     if (!options || options.forceStrokeColor || !options.fallbackStrokeColor) {
         return;
     }
-    if (getTextStrokeWidth(element) > 0 || (element.style.textShadow && element.style.textShadow !== 'none')) {
+    if (element.style.getPropertyValue('--aribb62-explicit-outline') ||
+        getTextStrokeWidth(element) > 0 ||
+        (element.style.textShadow && element.style.textShadow !== 'none')) {
         return;
     }
     applyTextStroke(element, resolveViewerStrokeWidth(options, scale), options.fallbackStrokeColor);

@@ -62,26 +62,17 @@ export function parseTTMLTextStroke(value, scale) {
     }
 
     let width = null;
+    let blur = null;
     const colorParts = [];
-    const lineStyles = {
-        solid: true,
-        double: true,
-        dotted: true,
-        dashed: true,
-        groove: true,
-        ridge: true,
-        inset: true,
-        outset: true
-    };
 
     parts.forEach((part) => {
-        const lower = part.toLowerCase();
-        const parsedWidth = width === null ? parseTTMLLength(part, 3840) : null;
-        if (parsedWidth !== null) {
-            width = parsedWidth;
+        const parsedLength = parseTTMLLength(part, 3840);
+        if (parsedLength !== null && width === null) {
+            width = parsedLength;
             return;
         }
-        if (lineStyles[lower]) {
+        if (parsedLength !== null && blur === null) {
+            blur = parsedLength;
             return;
         }
         colorParts.push(part);
@@ -92,8 +83,9 @@ export function parseTTMLTextStroke(value, scale) {
     }
 
     return {
-        width: Math.max(1, width * scale),
-        color: parseTTMLColor(colorParts.join(' ') || 'black')
+        width: width * scale,
+        blur: Math.max(0, (blur || 0) * scale),
+        color: colorParts.length > 0 ? parseTTMLColor(colorParts.join(' ')) : 'currentColor'
     };
 }
 
@@ -130,7 +122,8 @@ export function parseARIBAnimation(value) {
         cssTimingFunction(parts[2]),
         cssTime(parts[3]),
         parts[4],
-        cssAnimationDirection(parts[5])
+        cssAnimationDirection(parts[5]),
+        'both'
     ].join(' ');
 }
 
@@ -361,27 +354,17 @@ export function keyframeStyleToCSS(style, scale) {
     if (style.color) {
         declarations.push('color: ' + parseTTMLColor(style.color));
     }
-    if (style.fontSize) {
-        const pair = parseTTMLLengthPair(style.fontSize, [3840, 2160]);
-        const height = pair ? pair[1] : parseTTMLLength(style.fontSize, 2160);
-        if (height !== null) {
-            declarations.push('font-size: ' + Math.max(10, height * scale) + 'px');
-        }
-    }
-    if (style.extent) {
-        const extent = parseTTMLLengthPair(style.extent, [3840, 2160]);
-        if (extent) {
-            declarations.push('width: ' + (extent[0] * scale) + 'px');
-            declarations.push('height: ' + (extent[1] * scale) + 'px');
-        }
-    }
     if (style.opacity) {
         declarations.push('opacity: ' + style.opacity);
     }
     if (style.origin) {
         const origin = parseTTMLLengthPair(style.origin, [3840, 2160]);
         if (origin) {
-            declarations.push('transform: translate(' + (origin[0] * scale) + 'px, ' + (origin[1] * scale) + 'px)');
+            declarations.push(
+                'transform: translate(calc(' + (origin[0] * scale) +
+                'px - var(--aribb62-origin-x, 0px)), calc(' + (origin[1] * scale) +
+                'px - var(--aribb62-origin-y, 0px)))'
+            );
         }
     }
     return declarations;

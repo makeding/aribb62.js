@@ -53,6 +53,11 @@ if (originalWindow === undefined) {
 }
 
 const resourceRenderer = new B62TTMLRenderer();
+const invalidUtf8Result = resourceRenderer.push({
+    packetId: 99,
+    data: new Uint8Array([0x3c, 0x74, 0x74, 0x3e, 0xc3, 0x28])
+});
+assert.equal(invalidUtf8Result.documentKind, 'invalid');
 const resourceBytes = new Uint8Array([1, 2, 3]);
 const firstResourceResult = resourceRenderer.push({
     packetId: 1,
