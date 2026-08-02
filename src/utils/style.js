@@ -284,6 +284,10 @@ export function fontFaceFamilyStackForText(fontFaces, text) {
     return families.join(', ');
 }
 
+export function fontFaceMatchesText(fontFace, text) {
+    return !!fontFace && (!fontFace.unicodeRange || textMatchesUnicodeRange(text, fontFace.unicodeRange));
+}
+
 export function createFontFaceStyleElement(fontFaces) {
     const styleElement = document.createElement('style');
     styleElement.textContent = fontFaces.map((fontFace) => {
@@ -356,6 +360,20 @@ export function keyframeStyleToCSS(style, scale) {
     }
     if (style.color) {
         declarations.push('color: ' + parseTTMLColor(style.color));
+    }
+    if (style.fontSize) {
+        const pair = parseTTMLLengthPair(style.fontSize, [3840, 2160]);
+        const height = pair ? pair[1] : parseTTMLLength(style.fontSize, 2160);
+        if (height !== null) {
+            declarations.push('font-size: ' + Math.max(10, height * scale) + 'px');
+        }
+    }
+    if (style.extent) {
+        const extent = parseTTMLLengthPair(style.extent, [3840, 2160]);
+        if (extent) {
+            declarations.push('width: ' + (extent[0] * scale) + 'px');
+            declarations.push('height: ' + (extent[1] * scale) + 'px');
+        }
     }
     if (style.opacity) {
         declarations.push('opacity: ' + style.opacity);

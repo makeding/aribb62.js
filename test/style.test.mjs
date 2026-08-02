@@ -56,6 +56,9 @@ assert.deepEqual(
         fontSize: '46px'
     }, 0.25),
     [
+        'font-size: 11.5px',
+        'width: 75px',
+        'height: 25px',
         'transform: translate(calc(85px - var(--aribb62-origin-x, 0px)), calc(10px - var(--aribb62-origin-y, 0px)))'
     ]
 );

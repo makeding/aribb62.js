@@ -137,8 +137,7 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
                 style: blockStyle,
                 contentStyle: contentStyle,
                 spans: spans,
-                _rubyBaseNodes: collectTTMLBlockIdentityNodes(pNode),
-                _rubySourceNode: nearestTTMLBlockRubyNode(pNode)
+                _logicalNodes: collectTTMLBlockLogicalNodes(pNode)
             } : null,
             audios: audios
         });
@@ -169,7 +168,7 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
         });
     });
 
-    resolveTTMLBlockRubyAssociations(rawCues);
+    resolveTTMLRubyAssociations(rawCues);
 
     let minStart = null;
     rawCues.forEach((cue) => {
@@ -267,7 +266,7 @@ function ttmlPresentationGroupKey(node, groups, nextId) {
 function parseTTMLSpans(pNode, styles, inheritedStyle, regions) {
     const spans = [];
     appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans, regions || {}, null);
-    return resolveTTMLRubySpans(spans);
+    return spans;
 }
 
 function inheritedInlineTTMLStyle(style) {
@@ -291,7 +290,7 @@ function inheritedInlineTTMLStyle(style) {
     return result;
 }
 
-function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, regions, inheritedRegion) {
+function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, regions, regionContext) {
     if (!parentNode || !parentNode.childNodes) {
         return;
     }
@@ -301,7 +300,13 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
         if (child.nodeType === Node.TEXT_NODE || child.nodeType === Node.CDATA_SECTION_NODE) {
             const text = normalizeTTMLText(child.nodeValue || '');
             if (text !== '') {
-                spans.push({text: text, style: Object.assign({}, inheritedStyle), region: inheritedRegion});
+                spans.push({
+                    text: text,
+                    style: Object.assign({}, inheritedStyle),
+                    region: regionContext && regionContext.region,
+                    regionStyle: regionContext && regionContext.style,
+                    regionGroupId: regionContext && regionContext.groupId
+                });
             }
             continue;
         }
@@ -311,107 +316,70 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
 
         const name = localName(child);
         if (name === 'br') {
-            spans.push({text: '\n', style: Object.assign({}, inheritedStyle), region: inheritedRegion});
+            spans.push({
+                text: '\n',
+                style: Object.assign({}, inheritedStyle),
+                region: regionContext && regionContext.region,
+                regionStyle: regionContext && regionContext.style,
+                regionGroupId: regionContext && regionContext.groupId
+            });
             continue;
         }
         if (name !== 'span') {
-            appendTTMLInlineSpans(child, styles, inheritedStyle, spans, regions, inheritedRegion);
+            appendTTMLInlineSpans(child, styles, inheritedStyle, spans, regions, regionContext);
             continue;
         }
 
         const regionId = getTTMLAttr(child, 'region');
-        const region = regionId && regions[regionId] ? regions[regionId] : inheritedRegion;
+        const explicitRegion = regionId && regions[regionId] ? regions[regionId] : null;
+        const region = explicitRegion || (regionContext && regionContext.region);
+        const nextRegionContext = explicitRegion ? {
+            region: explicitRegion,
+            style: explicitRegion.style || {},
+            groupId: 'region:' + regionId
+        } : regionContext;
         const regionStyle = region && region.style ?
             Object.assign({}, inheritedStyle, region.style) : inheritedStyle;
         const style = mergeTTMLStyleRefs(child, styles, regionStyle);
         const beforeLength = spans.length;
-        appendTTMLInlineSpans(child, styles, style, spans, regions, region);
+        appendTTMLInlineSpans(child, styles, style, spans, regions, nextRegionContext);
         if (spans.length === beforeLength) {
             const text = normalizeTTMLText(child.textContent || '');
             if (text !== '') {
-                spans.push({text: text, style: style, region: region});
+                spans.push({
+                    text: text,
+                    style: style,
+                    region: region,
+                    regionStyle: nextRegionContext && nextRegionContext.style,
+                    regionGroupId: nextRegionContext && nextRegionContext.groupId
+                });
             }
         }
 
         const id = getXMLId(child);
         const rubyTargetId = getARIBTTMLAttr(child, 'ruby');
         for (let j = beforeLength; j < spans.length; j++) {
+            if ((id || rubyTargetId) && (!spans[j]._logicalNodes || spans[j]._logicalNodes.indexOf(child) < 0)) {
+                spans[j]._logicalNodes = spans[j]._logicalNodes || [];
+                spans[j]._logicalNodes.push(child);
+            }
             if (id && !spans[j].id) {
                 spans[j].id = id;
-                spans[j]._idSourceNode = child;
             }
             if (rubyTargetId && !spans[j].rubyTargetId) {
                 spans[j].rubyTargetId = rubyTargetId;
-                spans[j]._rubySourceNode = child;
             }
         }
     }
 }
 
-function resolveTTMLRubySpans(spans) {
-    const byId = new Map();
-    spans.forEach((span) => {
-        if (!span.id || span.rubyTargetId) {
-            return;
-        }
-        const existing = byId.get(span.id);
-        if (!existing) {
-            byId.set(span.id, {sourceNode: span._idSourceNode, spans: [span]});
-        } else if (existing.sourceNode === span._idSourceNode) {
-            existing.spans.push(span);
-        }
-    });
-
-    const annotations = new Map();
-    spans.forEach((span) => {
-        if (!span.rubyTargetId) {
-            return;
-        }
-        const sourceNode = span._rubySourceNode || span;
-        let annotation = annotations.get(sourceNode);
-        if (!annotation) {
-            annotation = {
-                id: span.id || '',
-                targetId: span.rubyTargetId,
-                spans: [],
-                text: ''
-            };
-            annotations.set(sourceNode, annotation);
-        }
-        annotation.spans.push(span);
-        annotation.text += span.text;
-    });
-
-    annotations.forEach((annotation) => {
-        const base = byId.get(annotation.targetId);
-        if (!base || base.sourceNode === annotation.spans[0]._rubySourceNode) {
-            return;
-        }
-        const metadata = {
-            id: annotation.id,
-            targetId: annotation.targetId,
-            text: annotation.text
-        };
-        base.spans[0].rubyAnnotations = base.spans[0].rubyAnnotations || [];
-        base.spans[0].rubyAnnotations.push(metadata);
-        annotation.spans.forEach((span) => {
-            span.rubyResolved = true;
-        });
-    });
-
-    spans.forEach((span) => {
-        delete span._idSourceNode;
-        delete span._rubySourceNode;
-    });
-    return spans;
-}
-
-function collectTTMLBlockIdentityNodes(pNode) {
+function collectTTMLBlockLogicalNodes(pNode) {
     const nodes = [];
     let current = pNode;
     while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
         const name = localName(current);
-        if ((name === 'p' || name === 'div') && getXMLId(current)) {
+        if ((name === 'p' || name === 'div') &&
+            (getXMLId(current) || getARIBTTMLAttr(current, 'ruby'))) {
             nodes.push(current);
         }
         current = current.parentNode;
@@ -419,65 +387,73 @@ function collectTTMLBlockIdentityNodes(pNode) {
     return nodes;
 }
 
-function nearestTTMLBlockRubyNode(pNode) {
-    let current = pNode;
-    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
-        const name = localName(current);
-        if ((name === 'p' || name === 'div') && getARIBTTMLAttr(current, 'ruby')) {
-            return current;
+function resolveTTMLRubyAssociations(rawCues) {
+    const representations = new Map();
+    const addRepresentation = (node, type, value) => {
+        let representation = representations.get(node);
+        if (!representation) {
+            representation = {node: node, spans: [], blocks: []};
+            representations.set(node, representation);
         }
-        current = current.parentNode;
-    }
-    return null;
-}
+        const values = type === 'span' ? representation.spans : representation.blocks;
+        if (values.indexOf(value) < 0) {
+            values.push(value);
+        }
+    };
 
-function resolveTTMLBlockRubyAssociations(rawCues) {
-    const targets = new Map();
-    const annotations = new Map();
     rawCues.forEach((cue) => {
         const block = cue.block;
         if (!block) {
             return;
         }
-        (block._rubyBaseNodes || []).forEach((node) => {
-            const id = getXMLId(node);
-            const existing = targets.get(id);
-            if (!existing) {
-                targets.set(id, {sourceNode: node, blocks: [block]});
-            } else if (existing.sourceNode === node) {
-                existing.blocks.push(block);
-            }
+        (block._logicalNodes || []).forEach((node) => addRepresentation(node, 'block', block));
+        block.spans.forEach((span) => {
+            (span._logicalNodes || []).forEach((node) => addRepresentation(node, 'span', span));
         });
-        if (block._rubySourceNode) {
-            let annotation = annotations.get(block._rubySourceNode);
-            if (!annotation) {
-                annotation = {
-                    sourceNode: block._rubySourceNode,
-                    targetId: getARIBTTMLAttr(block._rubySourceNode, 'ruby'),
-                    blocks: []
-                };
-                annotations.set(block._rubySourceNode, annotation);
-            }
-            annotation.blocks.push(block);
+    });
+
+    const ordered = Array.from(representations.values()).sort((left, right) => {
+        if (left.node === right.node || !left.node.compareDocumentPosition) {
+            return 0;
+        }
+        return left.node.compareDocumentPosition(right.node) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+    const targets = new Map();
+    ordered.forEach((representation) => {
+        const id = getXMLId(representation.node);
+        if (id && !targets.has(id)) {
+            targets.set(id, representation);
         }
     });
 
-    annotations.forEach((annotation) => {
-        const target = targets.get(annotation.targetId);
-        if (!target || target.sourceNode === annotation.sourceNode) {
+    ordered.forEach((annotation) => {
+        const targetId = getARIBTTMLAttr(annotation.node, 'ruby');
+        if (!targetId) {
+            return;
+        }
+        const annotationValues = annotation.spans.concat(annotation.blocks);
+        annotationValues.forEach((value) => {
+            value.rubyTargetId = value.rubyTargetId || targetId;
+            value.rubyTargetIds = value.rubyTargetIds || [];
+            if (value.rubyTargetIds.indexOf(targetId) < 0) {
+                value.rubyTargetIds.push(targetId);
+            }
+        });
+        const target = targets.get(targetId);
+        if (!target || target.node === annotation.node) {
             return;
         }
         const metadata = {
-            id: getXMLId(annotation.sourceNode) || '',
-            targetId: annotation.targetId,
-            element: localName(annotation.sourceNode),
-            text: annotation.blocks.map((block) => block.spans.map((span) => span.text).join('')).join('\n')
+            id: getXMLId(annotation.node) || '',
+            targetId: targetId,
+            element: localName(annotation.node),
+            text: rubyRepresentationText(annotation)
         };
-        target.blocks[0].rubyAnnotations = target.blocks[0].rubyAnnotations || [];
-        target.blocks[0].rubyAnnotations.push(metadata);
-        annotation.blocks.forEach((block) => {
-            block.rubyTargetId = annotation.targetId;
-            block.rubyResolved = true;
+        const targetValue = target.spans[0] || target.blocks[0];
+        targetValue.rubyAnnotations = targetValue.rubyAnnotations || [];
+        targetValue.rubyAnnotations.push(metadata);
+        annotationValues.forEach((value) => {
+            value.rubyResolved = true;
         });
     });
 
@@ -485,9 +461,16 @@ function resolveTTMLBlockRubyAssociations(rawCues) {
         if (!cue.block) {
             return;
         }
-        delete cue.block._rubyBaseNodes;
-        delete cue.block._rubySourceNode;
+        delete cue.block._logicalNodes;
+        cue.block.spans.forEach((span) => delete span._logicalNodes);
     });
+}
+
+function rubyRepresentationText(representation) {
+    if (representation.spans.length > 0) {
+        return representation.spans.map((span) => span.text).join('');
+    }
+    return representation.blocks.map((block) => block.spans.map((span) => span.text).join('')).join('\n');
 }
 
 function collectTTMLStyles(doc) {

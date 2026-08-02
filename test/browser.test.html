@@ -120,17 +120,33 @@ const styleAndRubyText = `
     <p xml:id="base-p" region="r" begin="0s" end="10s">
       <span xml:id="base"><span tts:textOutline="#00ff00ff 2px 1px"
         arib-tt:text-shadow="1px 1px 0px #000000">基</span>文</span>
-      <span arib-tt:ruby="base">き</span><span arib-tt:ruby="base">ぶん</span>
+      <span tts:textOutline="none">no-outline</span>
+      <span tts:color="#ff0000" tts:textOutline="2px">current-outline</span>
     </p>
-  </div><div arib-tt:ruby="base-div"><p region="r" begin="0s" end="10s">全体ルビ</p></div></body>
+    <p region="r" begin="0s" end="10s"><span arib-tt:ruby="base">き</span><span arib-tt:ruby="base">ぶん</span></p>
+  </div>
+  <div arib-tt:ruby="base-div"><p arib-tt:ruby="base-p" region="r" begin="0s" end="10s">全体ルビ</p></div>
+  <div><p xml:id="p-target" region="r" begin="0s" end="10s">段落基文</p>
+    <p region="r" begin="0s" end="10s"><span arib-tt:ruby="p-target">span-to-p</span></p>
+    <p arib-tt:ruby="base" region="r" begin="0s" end="10s">p-to-span</p>
+    <p region="r" begin="0s" end="10s"><span arib-tt:ruby="later">before</span></p>
+    <p region="r" begin="0s" end="10s"><span xml:id="later">later</span><span arib-tt:ruby="missing">unresolved</span></p>
+  </div></body>
 </tt>`;
 const styleAndRuby = parseARIBTTMLDocument(styleAndRubyText, 0, 0, false);
 const rubyBlocks = styleAndRuby.cues[0].blocks;
 const baseSpan = rubyBlocks[0].spans.find((span) => span.id === 'base');
-assert(baseSpan.rubyAnnotations.length === 2, 'multiple ruby annotations must be preserved in document order');
+assert(baseSpan.rubyAnnotations.length === 3, 'cross-p and cross-type ruby annotations must be preserved');
 assert(baseSpan.rubyAnnotations[0].text === 'き' && baseSpan.rubyAnnotations[1].text === 'ぶん', 'ruby metadata text');
 assert(rubyBlocks[0].rubyAnnotations[0].text === '全体ルビ', 'div/p ruby association metadata');
-assert(rubyBlocks.some((block) => block.rubyResolved), 'ruby annotation blocks must remain associated');
+const pTarget = rubyBlocks.find((block) => block.xmlId === 'p-target');
+assert(pTarget.rubyAnnotations[0].text === 'span-to-p', 'span annotation must resolve a p target');
+const nestedAnnotation = rubyBlocks.find((block) => block.spans.some((span) => span.text === '全体ルビ'));
+assert(nestedAnnotation.rubyTargetIds.length === 2, 'nested div and p ruby relations must both survive');
+const laterSpan = rubyBlocks.flatMap((block) => block.spans).find((span) => span.id === 'later');
+assert(laterSpan.rubyAnnotations[0].text === 'before', 'annotation-before-base must resolve document-wide');
+const unresolved = rubyBlocks.flatMap((block) => block.spans).find((span) => span.text === 'unresolved');
+assert(!unresolved.rubyResolved, 'an unresolved ruby relation must remain ordinary visible text');
 
 const styleMedia = document.createElement('video');
 Object.defineProperty(styleMedia, 'currentTime', {value: 0, writable: true});
@@ -139,8 +155,7 @@ sizeOverlay(styleOverlay);
 document.body.append(styleMedia, styleOverlay);
 const styleRenderer = new B62TTMLRenderer({
     mediaElement: styleMedia,
-    overlayElement: styleOverlay,
-    fallbackStrokeColor: false
+    overlayElement: styleOverlay
 });
 styleRenderer.push({packetId: 3, text: styleAndRubyText});
 assert(styleOverlay.textContent.includes('き') && styleOverlay.textContent.includes('ぶん'), 'ruby annotations must not be removed from broadcaster layout');
@@ -151,12 +166,17 @@ assert(
     outlined.style.webkitTextStroke.includes('rgb(0, 255, 0)') || outlined.style.webkitTextStroke.includes('#00ff00'),
     'textOutline color: ' + outlined.style.webkitTextStroke
 );
+const noOutline = Array.from(styleOverlay.querySelectorAll('span')).find((span) => span.textContent === 'no-outline');
+assert(noOutline.style.webkitTextStroke.startsWith('0px'), 'textOutline none must suppress the viewer fallback stroke');
+const currentOutline = Array.from(styleOverlay.querySelectorAll('span')).find((span) => span.textContent === 'current-outline');
+assert(currentOutline.style.webkitTextStroke.includes('currentcolor'), 'textOutline without a color must use currentColor');
 assert(
     outlined.style.textShadow.includes('0.1px 0.1px 0px') &&
         outlined.style.textShadow.includes('0px 0px 0.1px'),
     'textOutline blur must compose with text-shadow: ' + outlined.style.textShadow
 );
 assert(styleOverlay.querySelector('.ttml-subtitle-block').style.overflow === 'hidden', 'TR-B39 overflow must always clip');
+assert(styleOverlay.querySelector('.ttml-subtitle-block').style.width === '384px', 'stroke must not expand the region clipping box');
 styleRenderer.destroy();
 
 const regionStyleReference = parseARIBTTMLDocument(`
@@ -181,15 +201,21 @@ const scrollingText = `
     </arib-tt:keyframes>
     <style xml:id="s1" tts:fontSize="46px"/>
     <style xml:id="s2" arib-tt:animation="scroll 1000ms linear 0ms 1 normal"/>
+    <style xml:id="s3" tts:color="#ff0000"/>
   </styling><layout>
     <region xml:id="r1" style="s1" tts:origin="40px 40px" tts:extent="300px 100px"/>
     <region xml:id="r2" style="s2" tts:origin="40px 40px" tts:extent="300px 100px"/>
+    <region xml:id="r3" tts:origin="100px 40px" tts:extent="100px 100px"/>
   </layout></head>
-  <body><div><p region="r1" begin="0s" end="10s"><span region="r2">scrolling</span></p></div></body>
+  <body><div><p region="r1" begin="0s" end="10s"><span region="r2">scrolling<br/>second line</span><span region="r3">other region</span><span region="r2" style="s3"> sibling</span></p></div></body>
 </tt>`;
 const scrolling = parseARIBTTMLDocument(scrollingText, 0, 0, false);
 const scrollingSpan = scrolling.cues[0].blocks[0].spans[0];
 assert(scrollingSpan.region.origin[0] === 40, 'span region origin must survive parsing');
+assert(
+    scrolling.cues[0].blocks[0].spans.filter((span) => span.regionGroupId === scrollingSpan.regionGroupId).length === 4,
+    'all content assigned to one resolved region must keep one layout group'
+);
 assert(
     scrollingSpan.style.animation && scrollingSpan.style.animation.startsWith('scroll '),
     'span region style must supply animation: ' + JSON.stringify(scrollingSpan)
@@ -210,6 +236,11 @@ const animationSpan = animationOverlay.querySelector('.ttml-subtitle-line > span
 const animationStyle = animationOverlay.querySelector('style').textContent;
 assert(animationSpan.style.getPropertyValue('--aribb62-origin-x') === '4px', 'animated span base origin');
 assert(animationSpan.style.animationName.startsWith('aribb62-'), 'keyframe names must be presentation scoped');
+assert(animationSpan.hasAttribute('data-aribb62-region-group') && animationSpan.children.length === 4, 'multi-line and sibling spans in one region must share one positioned wrapper');
+assert(animationSpan.textContent === 'scrolling\nsecond linesibling', 'same-region sibling spans must retain flow order');
+assert(animationSpan.lastElementChild.style.color === 'rgb(255, 0, 0)', 'same-region sibling spans must retain their direct style');
+assert(animationOverlay.querySelectorAll('[data-aribb62-region-group]').length === 2, 'non-contiguous content must still form one wrapper per resolved region');
+assert(animationOverlay.querySelector('.ttml-subtitle-block').style.left === '4px' && animationOverlay.querySelector('.ttml-subtitle-block').style.width === '30px', 'clip region geometry must remain exact');
 assert(animationStyle.includes('calc(34px - var(--aribb62-origin-x, 0px))'), 'absolute keyframe origin must subtract the span region origin');
 let bbox = animationSpan.getBoundingClientRect();
 let overlayBox = animationOverlay.getBoundingClientRect();
@@ -233,6 +264,54 @@ const scopedKeyframes = Array.from(animationOverlay.querySelectorAll('style')).m
 }).filter(Boolean);
 assert(scopedKeyframes.length === 2 && scopedKeyframes[0] !== scopedKeyframes[1], 'same-name keyframes from concurrent tracks must not collide');
 animationRenderer.destroy();
+
+const pRegionAnimationText = scrollingText.replace(
+    '<p region="r1" begin="0s" end="10s"><span region="r2">scrolling<br/>second line</span><span region="r3">other region</span><span region="r2" style="s3"> sibling</span></p>',
+    '<p region="r2" begin="0s" end="10s">p region animation</p>'
+);
+const pAnimationMedia = document.createElement('video');
+Object.defineProperty(pAnimationMedia, 'currentTime', {value: 0, writable: true});
+const pAnimationOverlay = document.createElement('div');
+sizeOverlay(pAnimationOverlay);
+document.body.append(pAnimationMedia, pAnimationOverlay);
+const pAnimationRenderer = new B62TTMLRenderer({mediaElement: pAnimationMedia, overlayElement: pAnimationOverlay, fallbackStrokeColor: false});
+pAnimationRenderer.push({packetId: 8, text: pRegionAnimationText});
+assert(pAnimationOverlay.querySelector('.ttml-subtitle-line').style.animationName.startsWith('aribb62-'), 'a p region animation must be applied to its content layer');
+pAnimationRenderer.destroy();
+
+const spanOnlyRegionText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+  <head><layout><region xml:id="only" tts:origin="40px 40px" tts:extent="300px 100px"/></layout></head>
+  <body><div><p begin="0s" end="10s"><span region="only">span only</span></p></div></body>
+</tt>`;
+const spanOnlyMedia = document.createElement('video');
+Object.defineProperty(spanOnlyMedia, 'currentTime', {value: 0, writable: true});
+const spanOnlyOverlay = document.createElement('div');
+sizeOverlay(spanOnlyOverlay);
+document.body.append(spanOnlyMedia, spanOnlyOverlay);
+const spanOnlyRenderer = new B62TTMLRenderer({mediaElement: spanOnlyMedia, overlayElement: spanOnlyOverlay, fallbackStrokeColor: false});
+spanOnlyRenderer.push({packetId: 6, text: spanOnlyRegionText});
+const spanOnly = spanOnlyOverlay.querySelector('[data-aribb62-region-group]');
+assert(Math.abs(spanOnly.getBoundingClientRect().left - spanOnlyOverlay.getBoundingClientRect().left - 4) < 1, 'a span-only region must use plane coordinates without the legacy fallback box');
+spanOnlyRenderer.destroy();
+
+const verticalRegionText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+  <head><layout><region xml:id="vertical" tts:writingMode="tbrl" tts:origin="400px 40px" tts:extent="100px 200px"/></layout></head>
+  <body><div><p begin="0s" end="10s"><span region="vertical">縦書</span></p></div></body>
+</tt>`;
+const verticalAnchorMedia = document.createElement('video');
+Object.defineProperty(verticalAnchorMedia, 'currentTime', {value: 0, writable: true});
+const verticalAnchorOverlay = document.createElement('div');
+sizeOverlay(verticalAnchorOverlay);
+document.body.append(verticalAnchorMedia, verticalAnchorOverlay);
+const verticalAnchorRenderer = new B62TTMLRenderer({mediaElement: verticalAnchorMedia, overlayElement: verticalAnchorOverlay, fallbackStrokeColor: false});
+verticalAnchorRenderer.push({packetId: 7, text: verticalRegionText});
+const verticalSpan = verticalAnchorOverlay.querySelector('[data-aribb62-region-group]');
+const verticalBlock = verticalSpan.getBoundingClientRect();
+assert(Math.abs(verticalBlock.right - verticalAnchorOverlay.getBoundingClientRect().left - 40) < 1, 'vertical span region origin must anchor the right edge');
+assert(getComputedStyle(verticalSpan).writingMode === 'vertical-rl', 'a span region must apply its vertical writing mode');
+verticalAnchorRenderer.destroy();
 
 document.getElementById('result').textContent = 'PASS';
 </script>

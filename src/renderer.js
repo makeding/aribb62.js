@@ -5,6 +5,7 @@ import {
     applyTTMLBorder,
     createCueStyleElement,
     cssEscapeUrl,
+    fontFaceMatchesText,
     fontFaceFamilyStackForText,
     getTextStrokeWidth,
     mapARIBFontFamily,
@@ -41,6 +42,7 @@ export class B62DOMRenderer {
             overlay.innerHTML = '';
         }
         this._activeFontKeys.clear();
+        this._pruneFontLoads();
     }
 
     renderScene(context) {
@@ -49,7 +51,7 @@ export class B62DOMRenderer {
         if (!overlay) {
             return;
         }
-        this.clear(context);
+        overlay.innerHTML = '';
         (context.cues || []).forEach((cue) => {
             if (!cue.clear) {
                 renderTTMLCueDOM(
@@ -68,6 +70,7 @@ export class B62DOMRenderer {
         this.clear(context);
         this._destroyed = true;
         this._requestLayout = null;
+        this._fontLoads.clear();
     }
 
     syncTime(context) {
@@ -98,6 +101,7 @@ export class B62DOMRenderer {
         this._requestLayout = context && context.requestLayout;
         this._activeFontKeys = new Set();
         if (!fontSet || typeof fontSet.load !== 'function') {
+            this._pruneFontLoads();
             return;
         }
 
@@ -105,7 +109,8 @@ export class B62DOMRenderer {
         (context.cues || []).forEach((cue) => {
             const text = cue.blocks.map((block) => block.spans.map((span) => span.text || '').join('')).join('');
             (cue.fontFaces || []).forEach((fontFace) => {
-                if (!fontFace || !fontFace.family || !fontFace.url || fontFace.svgGlyphs) {
+                if (!fontFace || !fontFace.family || !fontFace.url || fontFace.svgGlyphs ||
+                    !fontFaceMatchesText(fontFace, text)) {
                     return;
                 }
                 const key = [fontFace.family, fontFace.url, fontFace.unicodeRange || ''].join('|');
@@ -117,6 +122,7 @@ export class B62DOMRenderer {
                 }
             });
         });
+        this._pruneFontLoads();
 
         requests.forEach((request, key) => {
             if (this._fontLoads.has(key)) {
@@ -129,10 +135,23 @@ export class B62DOMRenderer {
                 record.state = 'loaded';
                 if (!this._destroyed && this._activeFontKeys.has(key) && typeof this._requestLayout === 'function') {
                     this._requestLayout();
+                } else if (!this._activeFontKeys.has(key)) {
+                    this._fontLoads.delete(key);
                 }
             }, () => {
                 record.state = 'failed';
+                if (!this._activeFontKeys.has(key)) {
+                    this._fontLoads.delete(key);
+                }
             });
+        });
+    }
+
+    _pruneFontLoads() {
+        this._fontLoads.forEach((record, key) => {
+            if (!this._activeFontKeys.has(key) && record.state !== 'pending') {
+                this._fontLoads.delete(key);
+            }
         });
     }
 }
@@ -157,10 +176,17 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     }
 
     cue.blocks.forEach((block) => {
-        const region = block.region || {};
+        const hasSpanRegion = block.spans.some((span) => !!span.region);
+        const region = block.region || (hasSpanRegion ? {
+            origin: [0, 0],
+            extent: [planeWidth, planeHeight],
+            displayAlign: 'before',
+            style: {}
+        } : {});
         const origin = region.origin || [planeWidth * 0.1, planeHeight * 0.78];
         const extent = region.extent || [planeWidth * 0.8, planeHeight * 0.16];
-        const blockLeft = marginX + origin[0] * scale;
+        const regionLeft = ttmlRegionLeft(region, origin, extent);
+        const blockLeft = marginX + regionLeft * scale;
         const blockTop = marginY + origin[1] * scale;
         const blockWidth = extent[0] * scale;
         const blockHeight = extent[1] * scale;
@@ -195,12 +221,11 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         applyViewerStyle(blockElement, styleOptions, scale);
         applyFallbackReadableTextStyle(blockElement, styleOptions, scale);
         applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
-        const strokePadding = Math.ceil(getTextStrokeWidth(blockElement));
-        blockElement.style.left = (blockLeft - strokePadding) + 'px';
-        blockElement.style.top = (blockTop - strokePadding) + 'px';
-        blockElement.style.width = (blockWidth + strokePadding * 2) + 'px';
-        blockElement.style.height = (blockHeight + strokePadding * 2) + 'px';
-        blockElement.style.padding = strokePadding + 'px';
+        blockElement.style.left = blockLeft + 'px';
+        blockElement.style.top = blockTop + 'px';
+        blockElement.style.width = blockWidth + 'px';
+        blockElement.style.height = blockHeight + 'px';
+        blockElement.style.padding = '0';
         if (block.style.backgroundImageUrl) {
             blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
             blockElement.style.backgroundRepeat = 'no-repeat';
@@ -229,18 +254,35 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         if (!lineStyle.writingMode && block.style.writingMode) {
             lineStyle.writingMode = block.style.writingMode;
         }
+        if (!lineStyle.animation && block.style.animation) {
+            lineStyle.animation = block.style.animation;
+        }
         applyTTMLStyle(line, lineStyle, scale, {animationNames: animationNames});
         const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
         const renderedSpans = [];
-        block.spans.forEach((span) => {
-            const element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces, region, animationNames);
+        const renderedRegionGroups = new Set();
+        for (let spanIndex = 0; spanIndex < block.spans.length;) {
+            const span = block.spans[spanIndex];
+            let element;
+            if (span.regionGroupId) {
+                spanIndex++;
+                if (renderedRegionGroups.has(span.regionGroupId)) {
+                    continue;
+                }
+                renderedRegionGroups.add(span.regionGroupId);
+                const group = block.spans.filter((candidate) => candidate.regionGroupId === span.regionGroupId);
+                element = renderTTMLSpanRegionGroupDOM(group, scale, styleOptions, cue.fontFaces, region, animationNames);
+            } else {
+                element = renderTTMLSpanDOM(span, scale, styleOptions, cue.fontFaces, region, animationNames);
+                spanIndex++;
+            }
             line.appendChild(element);
             renderedSpans.push({
                 element: element,
                 color: span.style && span.style.backgroundColor ?
                     parseTTMLColor(span.style.backgroundColor) : ''
             });
-        });
+        }
         if (lineBackgroundColor) {
             if (styleOptions.lineBackground) {
                 blockElement.style.backgroundColor = '';
@@ -373,6 +415,35 @@ function clearElementBackgrounds(element) {
     });
 }
 
+function renderTTMLSpanRegionGroupDOM(spans, scale, styleOptions, fontFaces, parentRegion, animationNames) {
+    const first = spans[0];
+    const wrapper = document.createElement('span');
+    wrapper.setAttribute('data-aribb62-region-group', first.regionGroupId);
+    applyTTMLStyle(wrapper, first.regionStyle || {}, scale, {animationNames: animationNames});
+    applyFontFaceStack(wrapper, fontFaces, spans.map((span) => span.text || '').join(''));
+    spans.forEach((span) => {
+        const child = Object.assign({}, span, {
+            region: null,
+            regionGroupId: null,
+            regionStyle: null,
+            style: styleWithoutRegionAnimation(span.style, span.regionStyle)
+        });
+        wrapper.appendChild(renderTTMLSpanDOM(child, scale, styleOptions, fontFaces, null, animationNames));
+    });
+    applyTTMLSpanRegion(wrapper, first.region, parentRegion, scale);
+    return wrapper;
+}
+
+function styleWithoutRegionAnimation(style, regionStyle) {
+    const result = Object.assign({}, style || {});
+    ['animation', 'extent', 'origin'].forEach((name) => {
+        if (regionStyle && result[name] === regionStyle[name]) {
+            delete result[name];
+        }
+    });
+    return result;
+}
+
 function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion, animationNames) {
     const fontWidthRatio = resolveTTMLFontWidthRatio(span.style);
     if (span.rubyText) {
@@ -424,20 +495,37 @@ function applyTTMLRegionOriginVariables(element, region, scale) {
     element.style.setProperty('--aribb62-origin-y', (region.origin[1] * scale) + 'px');
 }
 
+function ttmlRegionLeft(region, origin, extent) {
+    const writingMode = mapWritingMode(region && region.style && region.style.writingMode);
+    return writingMode.writingMode && writingMode.writingMode !== 'horizontal-tb' ?
+        origin[0] - extent[0] : origin[0];
+}
+
 function applyTTMLSpanRegion(element, region, parentRegion, scale) {
     if (!element || !region) {
         return;
     }
     const origin = region.origin || [0, 0];
+    const extent = region.extent || [0, 0];
     const parentOrigin = parentRegion && parentRegion.origin ? parentRegion.origin : [0, 0];
+    const parentExtent = parentRegion && parentRegion.extent ? parentRegion.extent : [0, 0];
+    const left = ttmlRegionLeft(region, origin, extent);
+    const parentLeft = ttmlRegionLeft(parentRegion, parentOrigin, parentExtent);
     element.style.position = 'absolute';
     element.style.display = 'block';
-    element.style.left = ((origin[0] - parentOrigin[0]) * scale) + 'px';
+    element.style.left = ((left - parentLeft) * scale) + 'px';
     element.style.top = ((origin[1] - parentOrigin[1]) * scale) + 'px';
     element.style.overflow = 'hidden';
+    const writingMode = mapWritingMode(region.style && region.style.writingMode);
+    if (writingMode.writingMode) {
+        element.style.writingMode = writingMode.writingMode;
+    }
+    if (writingMode.direction) {
+        element.style.direction = writingMode.direction;
+    }
     if (region.extent) {
-        element.style.width = (region.extent[0] * scale) + 'px';
-        element.style.height = (region.extent[1] * scale) + 'px';
+        element.style.width = (extent[0] * scale) + 'px';
+        element.style.height = (extent[1] * scale) + 'px';
     }
     applyTTMLRegionOriginVariables(element, region, scale);
 }

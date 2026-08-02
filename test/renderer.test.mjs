@@ -119,6 +119,21 @@ await Promise.resolve();
 assert.equal(fontLayoutCount, 1, 'a loaded active WOFF must request one layout pass');
 fontRenderer._watchFonts(fontContext);
 assert.equal(fontLoadCount, 1, 'a loaded WOFF must not start a render loop');
+fontRenderer.renderScene(Object.assign({}, fontContext, {
+    cues: [Object.assign({clear: true}, fontContext.cues[0])]
+}));
+assert.equal(fontLoadCount, 1, 'rebuilding an active scene must retain its loaded WOFF state');
+
+fontRenderer._watchFonts({
+    overlayElement: fontOverlay,
+    requestLayout: fontContext.requestLayout,
+    cues: [{
+        fontFaces: [{family: 'Range font', url: 'blob:range-font', unicodeRange: 'U+E000'}],
+        blocks: [{spans: [{text: 'ASCII'}]}]
+    }]
+});
+assert.equal(fontLoadCount, 1, 'a unicode-range mismatch must not be marked as a loaded font');
+assert.equal(fontRenderer._fontLoads.size, 0, 'settled inactive WOFF entries must be pruned');
 
 let resolveObsoleteFont;
 const obsoleteLoad = new Promise((resolve) => {
@@ -138,6 +153,7 @@ resolveObsoleteFont([]);
 await obsoleteLoad;
 await Promise.resolve();
 assert.equal(fontLayoutCount, 1, 'an obsolete WOFF must not redraw a cleared scene');
+assert.equal(fontRenderer._fontLoads.size, 0, 'an obsolete pending WOFF must be removed after settlement');
 
 const renderedScenes = [];
 const outputRenderer = {

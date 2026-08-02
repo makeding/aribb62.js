@@ -113,9 +113,12 @@ export interface B62TTMLSpanCue {
   text: string
   rubyText?: string
   rubyTargetId?: string
+  rubyTargetIds?: string[]
   rubyResolved?: boolean
   rubyAnnotations?: B62TTMLRubyAssociation[]
   region?: object | null
+  regionStyle?: Record<string, string> | null
+  regionGroupId?: string | null
   style: Record<string, string>
 }
 
@@ -143,6 +146,7 @@ export interface B62TTMLBlockCue {
   style: Record<string, string>
   contentStyle?: Record<string, string>
   rubyTargetId?: string
+  rubyTargetIds?: string[]
   rubyResolved?: boolean
   rubyAnnotations?: B62TTMLRubyAssociation[]
   spans: B62TTMLSpanCue[]
