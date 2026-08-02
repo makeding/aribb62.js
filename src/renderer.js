@@ -54,7 +54,8 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.boxSizing = 'border-box';
         blockElement.style.color = '#fff';
         blockElement.style.whiteSpace = 'pre-wrap';
-        blockElement.style.overflow = 'visible';
+        const hasMarquee = !!block.style.marquee || block.spans.some((span) => span.style && span.style.marquee);
+        blockElement.style.overflow = hasMarquee ? 'hidden' : 'visible';
         blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
         blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
         blockElement.style.fontFamily = styleOptions.normalFont;
@@ -65,7 +66,11 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.textAlign = textAlign;
         blockElement.style.alignItems = mapTextAlignItems(textAlign);
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
-        applyTTMLStyle(blockElement, block.style, scale);
+        applyTTMLStyle(blockElement, block.style, scale, {
+            skipAnimation: true,
+            skipBorder: true,
+            skipMarquee: true
+        });
         applyViewerStyle(blockElement, styleOptions, scale);
         applyFallbackReadableTextStyle(blockElement, styleOptions, scale);
         applyFontFaceStack(blockElement, cue.fontFaces, block.spans.map((span) => span.text || '').join(''));
@@ -98,6 +103,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         line.style.width = 'auto';
         line.style.whiteSpace = isHorizontalWriting ? 'pre' : 'pre-wrap';
         line.style.tabSize = '1em';
+        applyTTMLStyle(line, block.contentStyle || {}, scale);
         const lineBackgroundColor = resolveLineBackgroundColor(blockElement, block, styleOptions);
         const renderedSpans = [];
         block.spans.forEach((span) => {
@@ -143,6 +149,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         }
         blockElement.appendChild(line);
         overlay.appendChild(blockElement);
+        finalizeTTMLFontWidths(blockElement);
     });
     appendMergedLineBackgroundLayer(overlay, mergedLineBackgrounds);
 }
@@ -236,19 +243,28 @@ function clearElementBackgrounds(element) {
 }
 
 function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
+    const fontWidthRatio = resolveTTMLFontWidthRatio(span.style);
     if (span.rubyText) {
         const rubyElement = document.createElement('ruby');
         const baseElement = document.createElement('span');
         const rubyTextElement = document.createElement('rt');
         rubyTextElement.style.fontSize = '50%';
         rubyTextElement.style.lineHeight = '1';
-        applyTTMLStyle(rubyElement, span.style, scale);
-        applyViewerStyle(rubyElement, styleOptions, scale);
-        applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
         appendTTMLTextWithSVGGlyphs(baseElement, span.text, fontFaces);
         appendTTMLTextWithSVGGlyphs(rubyTextElement, span.rubyText, fontFaces);
         rubyElement.appendChild(baseElement);
         rubyElement.appendChild(rubyTextElement);
+        if (fontWidthRatio !== 1) {
+            const wrapper = document.createElement('span');
+            applyTTMLStyle(wrapper, span.style, scale);
+            applyViewerStyle(wrapper, styleOptions, scale);
+            applyFontFaceStack(wrapper, fontFaces, (span.text || '') + (span.rubyText || ''));
+            applyTTMLFontWidth(wrapper, rubyElement, fontWidthRatio);
+            return wrapper;
+        }
+        applyTTMLStyle(rubyElement, span.style, scale);
+        applyViewerStyle(rubyElement, styleOptions, scale);
+        applyFontFaceStack(rubyElement, fontFaces, (span.text || '') + (span.rubyText || ''));
         return rubyElement;
     }
 
@@ -256,15 +272,62 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces) {
     applyTTMLStyle(spanElement, span.style, scale);
     applyViewerStyle(spanElement, styleOptions, scale);
     applyFontFaceStack(spanElement, fontFaces, span.text);
-    appendTTMLTextWithSVGGlyphs(spanElement, span.text, fontFaces);
+    if (fontWidthRatio !== 1) {
+        const contentElement = document.createElement('span');
+        appendTTMLTextWithSVGGlyphs(contentElement, span.text, fontFaces);
+        applyTTMLFontWidth(spanElement, contentElement, fontWidthRatio);
+    } else {
+        appendTTMLTextWithSVGGlyphs(spanElement, span.text, fontFaces);
+    }
     return spanElement;
 }
 
+function resolveTTMLFontWidthRatio(style) {
+    const value = style && style.fontSize ? String(style.fontSize).trim() : '';
+    if (value.split(/\s+/).length < 2) {
+        return 1;
+    }
+    const pair = parseTTMLLengthPair(value, [3840, 2160]);
+    if (!pair || !Number.isFinite(pair[0]) || !Number.isFinite(pair[1]) || pair[1] <= 0) {
+        return 1;
+    }
+    const ratio = pair[0] / pair[1];
+    return ratio > 0 ? ratio : 1;
+}
 
-function applyTTMLStyle(element, style, scale) {
+function applyTTMLFontWidth(wrapper, content, ratio) {
+    wrapper.style.display = 'inline-block';
+    wrapper.style.verticalAlign = 'top';
+    wrapper.setAttribute('data-aribb62-font-width-ratio', String(ratio));
+    content.setAttribute('data-aribb62-font-width-content', '');
+    content.style.display = 'inline-block';
+    content.style.transform = 'scaleX(' + ratio + ')';
+    content.style.transformOrigin = 'left top';
+    wrapper.appendChild(content);
+}
+
+function finalizeTTMLFontWidths(root) {
+    if (!root || !root.querySelectorAll) {
+        return;
+    }
+    root.querySelectorAll('[data-aribb62-font-width-ratio]').forEach((wrapper) => {
+        const content = wrapper.querySelector('[data-aribb62-font-width-content]');
+        if (!content || !content.getBoundingClientRect) {
+            return;
+        }
+        const rect = content.getBoundingClientRect();
+        if (rect.width > 0) {
+            wrapper.style.width = rect.width + 'px';
+        }
+    });
+}
+
+
+function applyTTMLStyle(element, style, scale, options) {
     if (!style) {
         return;
     }
+    options = options || {};
     if (style.fontSize) {
         const fontSize = parseTTMLLengthPair(style.fontSize, [3840, 2160]);
         const height = fontSize ? fontSize[1] : parseTTMLLength(style.fontSize, 2160);
@@ -308,15 +371,17 @@ function applyTTMLStyle(element, style, scale) {
     if (style.opacity) {
         element.style.opacity = String(style.opacity);
     }
-    applyTTMLBorder(element, style, scale);
-    if (style.animation) {
+    if (!options.skipBorder) {
+        applyTTMLBorder(element, style, scale);
+    }
+    if (style.animation && !options.skipAnimation) {
         const animation = parseARIBAnimation(style.animation);
         if (animation) {
             element.style.animation = animation;
         }
     }
-    if (style.marquee) {
-        applyARIBMarquee(element, style.marquee);
+    if (style.marquee && !options.skipMarquee) {
+        applyARIBMarquee(element, style.marquee, style.writingMode);
     }
 }
 
@@ -360,4 +425,3 @@ function applyFontFaceStack(element, fontFaces, text) {
         fontFaceStack + ', ' + element.style.fontFamily :
         fontFaceStack;
 }
-

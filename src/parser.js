@@ -116,9 +116,10 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
 
         const regionId = nearestTTMLAttr(pNode, 'region');
         const region = regions[regionId] || null;
-        const blockStyle = Object.assign({}, region && region.style ? region.style : {}, collectInheritedTTMLStyle(pNode, styles));
+        const contentStyle = collectInheritedTTMLStyle(pNode, styles);
+        const blockStyle = Object.assign({}, region && region.style ? region.style : {}, contentStyle);
         applyTTMLResourceStyle(blockStyle, embeddedImages, options.resourceResolver);
-        const spans = parseTTMLSpans(pNode, styles, blockStyle);
+        const spans = parseTTMLSpans(pNode, styles, inheritedInlineTTMLStyle(blockStyle));
         const audios = collectTTMLAudios(pNode, rawStart, rawEnd, rawDur, options.resourceResolver);
         const hasVisual = spans.length > 0 || !!blockStyle.backgroundImageUrl;
         if (!hasVisual && audios.length === 0) {
@@ -134,6 +135,7 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
                 groupKey: ttmlPresentationGroupKey(pNode, presentationGroups, () => nextPresentationGroupId++),
                 region: region,
                 style: blockStyle,
+                contentStyle: contentStyle,
                 spans: spans
             } : null,
             audios: audios
@@ -262,6 +264,25 @@ function parseTTMLSpans(pNode, styles, inheritedStyle) {
     const spans = [];
     appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans);
     return resolveTTMLRubySpans(spans);
+}
+
+function inheritedInlineTTMLStyle(style) {
+    const result = Object.assign({}, style || {});
+    [
+        'animation',
+        'backgroundColor',
+        'backgroundImage',
+        'backgroundImageUrl',
+        'border',
+        'borderTop',
+        'borderBottom',
+        'borderLeft',
+        'borderRight',
+        'displayAlign',
+        'marquee',
+        'opacity'
+    ].forEach((name) => delete result[name]);
+    return result;
 }
 
 function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans) {

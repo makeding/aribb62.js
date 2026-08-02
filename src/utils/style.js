@@ -7,11 +7,26 @@ import { parseTTMLColor, parseTTMLLength, parseTTMLLengthPair } from './ttml.js'
 export const DEFAULT_ARIB_FONT_STACK = '"Hiragino Maru Gothic Pro", "BIZ UDGothic", "Yu Gothic Medium", sans-serif';
 
 export function applyTTMLBorder(element, style, scale) {
-    const value = style.border || style.borderTop || style.borderBottom || style.borderLeft || style.borderRight;
-    const stroke = parseTTMLTextStroke(value, scale);
-    if (stroke) {
-        applyTextStroke(element, stroke.width, stroke.color);
+    if (!element || !style) {
+        return;
     }
+    if (style.border) {
+        element.style.border = scaleTTMLBorder(style.border, scale);
+    }
+    if (style.borderTop) {
+        element.style.borderTop = scaleTTMLBorder(style.borderTop, scale);
+    }
+    if (style.borderBottom) {
+        element.style.borderBottom = scaleTTMLBorder(style.borderBottom, scale);
+    }
+    if (style.borderLeft) {
+        element.style.borderLeft = scaleTTMLBorder(style.borderLeft, scale);
+    }
+    if (style.borderRight) {
+        element.style.borderRight = scaleTTMLBorder(style.borderRight, scale);
+    }
+    element.style.boxDecorationBreak = 'clone';
+    element.style.webkitBoxDecorationBreak = 'clone';
 }
 
 export function scaleTTMLBorder(value, scale) {
@@ -119,7 +134,7 @@ export function parseARIBAnimation(value) {
     ].join(' ');
 }
 
-export function applyARIBMarquee(element, value) {
+export function applyARIBMarquee(element, value, writingMode) {
     const parts = splitStyleTokens(value);
     if (parts.length < 4) {
         return;
@@ -131,14 +146,18 @@ export function applyARIBMarquee(element, value) {
     const duration = speed === 'slow' ? '16s' : (speed === 'fast' ? '6s' : '10s');
     element.style.display = element.style.display || 'inline-block';
     element.style.whiteSpace = 'pre';
-    element.style.animationName = direction === 'reverse' ? 'aribb62-marquee-reverse' : 'aribb62-marquee-forward';
+    const axis = /^(?:tblr|tbrl|vertical-lr|vertical-rl)$/.test(String(writingMode || '')) ? 'y' : 'x';
+    element.style.animationName = [
+        'aribb62-marquee',
+        style === 'slide' || style === 'alternate' ? style : 'scroll',
+        axis,
+        direction
+    ].join('-');
     element.style.animationDuration = duration;
     element.style.animationTimingFunction = 'linear';
     element.style.animationIterationCount = count;
     element.style.animationFillMode = style === 'scroll' ? 'none' : 'forwards';
-    if (style === 'alternate') {
-        element.style.animationDirection = 'alternate';
-    }
+    element.style.animationDirection = 'normal';
 }
 
 export function mapDisplayAlign(value) {
@@ -317,12 +336,21 @@ export function createCueStyleElement(cue, scale) {
     }
 
     if (cue.hasMarquee) {
-        css.push('@keyframes aribb62-marquee-forward { from { transform: translateX(-100%); } to { transform: translateX(100%); } }');
-        css.push('@keyframes aribb62-marquee-reverse { from { transform: translateX(100%); } to { transform: translateX(-100%); } }');
+        appendMarqueeKeyframes(css, 'x', 'translateX');
+        appendMarqueeKeyframes(css, 'y', 'translateY');
     }
 
     styleElement.textContent = css.join('\n');
     return styleElement;
+}
+
+function appendMarqueeKeyframes(css, axis, transform) {
+    css.push('@keyframes aribb62-marquee-scroll-' + axis + '-forward { from { transform: ' + transform + '(-100%); } to { transform: ' + transform + '(100%); } }');
+    css.push('@keyframes aribb62-marquee-scroll-' + axis + '-reverse { from { transform: ' + transform + '(100%); } to { transform: ' + transform + '(-100%); } }');
+    css.push('@keyframes aribb62-marquee-slide-' + axis + '-forward { from { transform: ' + transform + '(-100%); } to { transform: ' + transform + '(0); } }');
+    css.push('@keyframes aribb62-marquee-slide-' + axis + '-reverse { from { transform: ' + transform + '(100%); } to { transform: ' + transform + '(0); } }');
+    css.push('@keyframes aribb62-marquee-alternate-' + axis + '-forward { 0%, 100% { transform: ' + transform + '(-100%); } 50% { transform: ' + transform + '(100%); } }');
+    css.push('@keyframes aribb62-marquee-alternate-' + axis + '-reverse { 0%, 100% { transform: ' + transform + '(100%); } 50% { transform: ' + transform + '(-100%); } }');
 }
 
 export function keyframeStyleToCSS(style, scale) {

@@ -106,6 +106,8 @@
     <div class="controls">
       <button id="loadBasic">Basic</button>
       <button id="loadVertical">Vertical</button>
+      <button id="loadConformance">B62 width / border / marquee</button>
+      <button id="loadContinuation">Live continuation</button>
       <button id="loadAudio">Audio metadata</button>
       <button id="loadSvgFont">SVG font</button>
       <button id="restart">Restart</button>
@@ -203,6 +205,41 @@
     </div>
   </body>
 </tt>`,
+      conformance: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-ttml/v1_0"
+    ttp:extent="3840px 2160px" xml:lang="ja">
+  <head>
+    <styling>
+      <style xml:id="half" tts:fontFamily="丸ゴシック" tts:fontSize="70px 140px"
+             tts:lineHeight="170px" tts:color="white"
+             arib-tt:border-top="solid 5px #ffff00ff"
+             arib-tt:border-bottom="double 8px #00ffffff"/>
+      <style xml:id="verticalMove" tts:fontFamily="角ゴシック" tts:fontSize="110px"
+             tts:writingMode="tbrl" tts:color="white"
+             arib-tt:marquee="slide forward fast 1"/>
+    </styling>
+    <layout>
+      <region xml:id="wide" tts:origin="320px 1380px" tts:extent="3200px 300px" tts:displayAlign="center"/>
+      <region xml:id="vertical" tts:origin="3040px 180px" tts:extent="420px 1080px"/>
+    </layout>
+  </head>
+  <body><div>
+    <p region="wide" begin="00:00:00.000" end="00:00:12.000"><span style="half">横幅70・高さ140：半角幅セル</span></p>
+    <p region="vertical" begin="00:00:00.000" end="00:00:12.000" style="verticalMove">上から下へ</p>
+  </div></body>
+</tt>`,
+      liveSource: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" tts:extent="3840px 2160px">
+  <head><layout><region xml:id="bottom" tts:origin="400px 1480px" tts:extent="3040px 320px" tts:displayAlign="center"/></layout></head>
+  <body><div><p xml:id="keep" region="bottom" begin="00:00:00.000" end="indefinite" tts:fontSize="128px" tts:color="white">旧TTMLの内容を保持しています</p></div></body>
+</tt>`,
+      livePatch: `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"><body><div>
+  <p xml:id="keep" begin="indefinite" end="00:00:12.000">この新しい文字列は表示しない</p>
+</div></body></tt>`,
       audio: `<?xml version="1.0" encoding="UTF-8"?>
 <tt xmlns="http://www.w3.org/ns/ttml"
     xmlns:tts="http://www.w3.org/ns/ttml#styling"
@@ -314,6 +351,7 @@
       }
       status.textContent = [
         'events=' + lastResult.eventCount,
+        'document=' + lastResult.documentKind,
         'cues=' + lastResult.cueCount,
         'audios=' + lastResult.audioCount,
         'fonts=' + lastResult.fontFaceCount,
@@ -325,6 +363,17 @@
 
     document.getElementById('loadBasic').addEventListener('click', () => setSample('basic'));
     document.getElementById('loadVertical').addEventListener('click', () => setSample('vertical'));
+    document.getElementById('loadConformance').addEventListener('click', () => setSample('conformance'));
+    document.getElementById('loadContinuation').addEventListener('click', () => {
+      renderer.clear();
+      renderer.setLive(true);
+      media.currentTime = 2;
+      renderer.push({packetId: 0x100, mpuSequenceNumber: 1, pts: 0, text: samples.liveSource});
+      lastResult = renderer.push({packetId: 0x100, mpuSequenceNumber: 2, pts: 2, text: samples.livePatch});
+      input.value = samples.livePatch;
+      renderer.render();
+      updateStatus();
+    });
     document.getElementById('loadAudio').addEventListener('click', () => setSample('audio'));
     document.getElementById('loadSvgFont').addEventListener('click', () => setSample('svgFont'));
     document.getElementById('renderInput').addEventListener('click', pushCurrentText);

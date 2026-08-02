@@ -57,6 +57,7 @@ export interface B62TTMLPushData {
 export interface B62TTMLPushResult {
   eventCount: number
   packetId?: number
+  documentKind: 'none' | 'invalid' | 'clear' | 'presentation'
   cueCount: number
   cues: object[]
   audioCount: number
@@ -102,9 +103,11 @@ export interface B62TTMLAudioCue {
 }
 
 export interface B62TTMLBlockCue {
+  xmlId?: string
   groupKey?: string
   region: object | null
   style: Record<string, string>
+  contentStyle?: Record<string, string>
   spans: B62TTMLSpanCue[]
 }
 
@@ -117,6 +120,7 @@ export interface B62TTMLCue {
   eventId?: number
   eventStart?: number
   resourceScopeKey?: string
+  continuationId?: string
   plane: [number, number]
   fontFaces?: object[]
   keyframes?: object[]
