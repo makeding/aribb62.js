@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import aribb62js, {B62TTMLRenderer, TTMLRenderer} from '../src/index.js';
+import aribb62js, {B62DOMRenderer, B62TTMLRenderer, TTMLRenderer} from '../src/index.js';
 
 assert.equal(TTMLRenderer, B62TTMLRenderer);
 assert.equal(aribb62js.B62TTMLRenderer, B62TTMLRenderer);
+assert.equal(aribb62js.B62DOMRenderer, B62DOMRenderer);
 assert.equal(typeof B62TTMLRenderer.parse, 'function');
 assert.equal(typeof B62TTMLRenderer.renderCueDOM, 'function');
 assert.equal(typeof B62TTMLRenderer.previewCues, 'function');
@@ -75,5 +76,32 @@ resourceRenderer.push({packetId: 1, mpuSequenceNumber: 2});
 assert.deepEqual(Array.from(resourceRenderer._resourceScopes.keys()), ['packet:1:mpu:2']);
 resourceRenderer.reset();
 assert.equal(resourceRenderer._resourceScopes.size, 0);
+
+const renderedScenes = [];
+const outputRenderer = {
+    clear(context) {
+        renderedScenes.push({type: 'clear', cueCount: context.cues.length});
+    },
+    renderScene(context) {
+        renderedScenes.push({type: 'render', cueCount: context.cues.length});
+    }
+};
+const outputMedia = {
+    paused: true,
+    ended: false,
+    currentTime: 0,
+    addEventListener() {},
+    removeEventListener() {}
+};
+const outputOverlay = {style: {}, innerHTML: ''};
+const pluggableRenderer = new B62TTMLRenderer({
+    mediaElement: outputMedia,
+    overlayElement: outputOverlay,
+    outputRenderer: outputRenderer
+});
+assert.equal(renderedScenes.at(-1).type, 'render');
+pluggableRenderer.clear();
+assert.equal(renderedScenes.at(-1).type, 'clear');
+pluggableRenderer.destroy();
 
 console.log('renderer clock and resource lifecycle: ok');

@@ -13,6 +13,26 @@ export interface B62TTMLRendererOptions {
   forceBackgroundColor?: string
   backgroundPadding?: string
   lineBackground?: boolean
+  outputRenderer?: B62OutputRenderer
+}
+
+export interface B62RenderContext {
+  overlayElement: HTMLElement | null
+  mediaElement: HTMLVideoElement | null
+  cues: B62TTMLCue[]
+  styleOptions: B62TTMLRendererOptions
+}
+
+export interface B62OutputRenderer {
+  renderScene(context: B62RenderContext): void
+  clear?(context: B62RenderContext): void
+  destroy?(context: B62RenderContext): void
+}
+
+export declare class B62DOMRenderer implements B62OutputRenderer {
+  renderScene(context: B62RenderContext): void
+  clear(context: B62RenderContext): void
+  destroy(context: B62RenderContext): void
 }
 
 export interface B62TTMLResource {
@@ -152,6 +172,7 @@ export const TTMLRenderer: typeof B62TTMLRenderer
 
 declare const aribb62js: {
   B62TTMLRenderer: typeof B62TTMLRenderer
+  B62DOMRenderer: typeof B62DOMRenderer
   TTMLRenderer: typeof B62TTMLRenderer
 }
 

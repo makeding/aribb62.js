@@ -9,7 +9,7 @@ import {
 } from './utils/style.js';
 import {subtitleMediaTimeSeconds} from './utils/cues.js';
 import {findTTMLMinStart, parseARIBTTML, parseARIBTTMLDocument} from './parser.js';
-import {renderTTMLCueDOM} from './renderer.js';
+import {B62DOMRenderer, renderTTMLCueDOM} from './renderer.js';
 import {B62RendererStateMachine, B62StateKeys} from './utils/state.js';
 import {collectPushResultFontFaces} from './utils/result.js';
 import {getMediaContentViewport, isElementNode} from './utils/viewport.js';
@@ -45,6 +45,7 @@ class B62TTMLRenderer {
             backgroundPadding: options.backgroundPadding || '0.08em 0.08em',
             lineBackground: !!options.lineBackground
         };
+        this._outputRenderer = options.outputRenderer || new B62DOMRenderer();
         this._lastCueKey = null;
         this._lastLayoutKey = null;
         this._clockId = null;
@@ -147,6 +148,9 @@ class B62TTMLRenderer {
         this.detachMediaElement();
         this._cancelLayoutRender();
         this.clear();
+        if (this._outputRenderer && typeof this._outputRenderer.destroy === 'function') {
+            this._outputRenderer.destroy(this._renderContext([]));
+        }
         this._clearResourceUrls();
         this._overlay = null;
         this._state.destroy();
@@ -157,9 +161,7 @@ class B62TTMLRenderer {
         this._releaseUnusedResourceScopes();
         this._lastCueKey = null;
         this._lastLayoutKey = null;
-        if (this._overlay) {
-            this._overlay.innerHTML = '';
-        }
+        this._clearOutput();
     }
 
     reset() {
@@ -201,7 +203,7 @@ class B62TTMLRenderer {
             this._state.resolveContinuations(transaction, parsedDocument.continuations) : [];
         const cues = parsedDocument.cues.concat(continuedCues);
         let presentationCues;
-        if (parsedDocument.kind === 'clear' || cues.length === 0) {
+        if (parsedDocument.kind === 'clear') {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
             presentationCues = [{
                 key: 'clear:' + start,
@@ -211,6 +213,14 @@ class B62TTMLRenderer {
                 plane: [3840, 2160],
                 blocks: []
             }];
+        } else if (cues.length === 0) {
+            this._pruneCues(currentTime);
+            this._releaseUnusedResourceScopes();
+            this.render();
+            return this._buildPushResult(
+                data, text, cues, basePts, effectiveBasePts, arrivalAligned,
+                resources, timelineOffset, parsedDocument.kind
+            );
         } else {
             presentationCues = cues;
         }
@@ -242,16 +252,7 @@ class B62TTMLRenderer {
         }
         this._lastCueKey = key;
         this._lastLayoutKey = layoutKey;
-        overlay.innerHTML = '';
-
-        if (cues.length === 0) {
-            return;
-        }
-        cues.forEach((cue) => {
-            if (!cue.clear) {
-                renderTTMLCueDOM(overlay, cue, this._styleOptions, mediaElement);
-            }
-        });
+        this._outputRenderer.renderScene(this._renderContext(cues));
     }
 
     _decodeText(data) {
@@ -367,6 +368,26 @@ class B62TTMLRenderer {
         this._overlay.style.overflow = 'hidden';
         if (!this._overlay.style.fontFamily) {
             this._overlay.style.fontFamily = this._styleOptions.normalFont;
+        }
+    }
+
+    _renderContext(cues) {
+        return {
+            overlayElement: this._overlay,
+            mediaElement: this._mediaElement,
+            cues: cues || [],
+            styleOptions: this._styleOptions
+        };
+    }
+
+    _clearOutput() {
+        if (!this._overlay || !this._outputRenderer) {
+            return;
+        }
+        if (typeof this._outputRenderer.clear === 'function') {
+            this._outputRenderer.clear(this._renderContext([]));
+        } else {
+            this._overlay.innerHTML = '';
         }
     }
 
@@ -549,6 +570,7 @@ B62TTMLRenderer.previewCues = previewTTMLCues;
 const TTMLRenderer = B62TTMLRenderer;
 const aribb62js = {
     B62TTMLRenderer: B62TTMLRenderer,
+    B62DOMRenderer: B62DOMRenderer,
     TTMLRenderer: TTMLRenderer
 };
 
@@ -556,5 +578,5 @@ if (typeof window !== 'undefined') {
     window.aribb62js = aribb62js;
 }
 
-export { B62TTMLRenderer, TTMLRenderer };
+export { B62DOMRenderer, B62TTMLRenderer, TTMLRenderer };
 export default aribb62js;

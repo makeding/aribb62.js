@@ -18,6 +18,46 @@ import {getMediaContentViewport} from './utils/viewport.js';
 import {appendTTMLTextWithSVGGlyphs} from './utils/glyphs.js';
 import {parseTTMLColor, parseTTMLLength, parseTTMLLengthPair} from './utils/ttml.js';
 
+/**
+ * Default B62 output backend.
+ *
+ * B62TTMLRenderer owns document parsing, timing and presentation state. This
+ * class owns only the DOM paint step so a renderer for an incompatible output
+ * model (Canvas, native/WASM bitmaps, etc.) can be supplied without forking the
+ * B62 state machine.
+ */
+export class B62DOMRenderer {
+    clear(context) {
+        const overlay = context && context.overlayElement;
+        if (overlay) {
+            overlay.innerHTML = '';
+        }
+    }
+
+    renderScene(context) {
+        context = context || {};
+        const overlay = context.overlayElement;
+        if (!overlay) {
+            return;
+        }
+        this.clear(context);
+        (context.cues || []).forEach((cue) => {
+            if (!cue.clear) {
+                renderTTMLCueDOM(
+                    overlay,
+                    cue,
+                    context.styleOptions || {},
+                    context.mediaElement || null
+                );
+            }
+        });
+    }
+
+    destroy(context) {
+        this.clear(context);
+    }
+}
+
 export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     styleOptions = styleOptions || {};
     const viewport = getMediaContentViewport(overlay, mediaElement);
@@ -145,6 +185,7 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
                 mergedLineBackgrounds.push({
                     element: span.element,
                     color: span.color,
+                    groupKey: block.groupKey || 'group:default',
                     writingMode: writingMode.writingMode || 'horizontal-tb',
                     top: blockTop,
                     height: resolveTTMLLineBoxHeight(block, scale)
@@ -169,7 +210,11 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
         if (rect.width <= 0 || rect.height <= 0) {
             return;
         }
-        const groupKey = [background.writingMode, background.color].join('|');
+        const groupKey = [
+            background.groupKey || 'group:default',
+            background.writingMode,
+            background.color
+        ].join('|');
         if (!groups.has(groupKey)) {
             groups.set(groupKey, {color: background.color, rects: []});
         }
