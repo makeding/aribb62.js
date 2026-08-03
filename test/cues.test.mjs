@@ -66,7 +66,16 @@ assert.deepEqual(nearbyGroups[0], [
     {left: 80, top: 32, right: 350, bottom: 48}
 ]);
 assert.equal(connectedRectPath(nearbyGroups[0], 1),
-    'M 80 16 H 310 V 32 H 350 V 48 H 80 V 32 H 80 V 16 Z');
+    'M 80 16 H 310 V 32 H 80 Z M 80 32 H 350 V 48 H 80 Z');
+
+const branchingBackground = groupNearbyRects([
+    {left: 10, top: 0, right: 20, bottom: 10},
+    {left: 30, top: 0, right: 40, bottom: 10},
+    {left: 5, top: 10, right: 45, bottom: 20}
+], 1);
+assert.equal(branchingBackground.length, 1);
+assert.equal(connectedRectPath(branchingBackground[0], 1),
+    'M 10 0 H 20 V 10 H 10 Z M 30 0 H 40 V 10 H 30 Z M 5 10 H 45 V 20 H 5 Z');
 
 assert.equal(normalizeTTMLText('　西原村　御船町'), '　西原村　御船町');
 assert.equal(normalizeTTMLText('  plain text  '), 'plain text');

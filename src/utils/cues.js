@@ -150,23 +150,22 @@ export function connectedRectPath(rects, tolerance) {
         }
     }
 
-    const first = rows[0];
-    const commands = ['M', first.left, first.top, 'H', first.right];
-    rows.forEach((row, index) => {
-        commands.push('V', row.bottom);
-        if (index + 1 < rows.length) {
-            commands.push('H', rows[index + 1].right);
-        }
+    // Keep every measured character/line box as an independent subpath.
+    // A single staircase outline only works when there is exactly one box per
+    // row. ARIB readings commonly create several disjoint boxes above one main
+    // line; joining those points bridges the intentional transparent gaps.
+    // One compound path still composites a translucent color only once where
+    // boxes touch or overlap.
+    const commands = [];
+    rows.forEach((row) => {
+        commands.push(
+            'M', row.left, row.top,
+            'H', row.right,
+            'V', row.bottom,
+            'H', row.left,
+            'Z'
+        );
     });
-    const last = rows[rows.length - 1];
-    commands.push('H', last.left);
-    for (let i = rows.length - 1; i >= 0; i--) {
-        commands.push('V', rows[i].top);
-        if (i > 0) {
-            commands.push('H', rows[i - 1].left);
-        }
-    }
-    commands.push('Z');
     return commands.join(' ');
 }
 
