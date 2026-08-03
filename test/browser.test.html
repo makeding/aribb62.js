@@ -345,7 +345,8 @@ document.body.append(smallScreenMedia, smallScreenOverlay);
 const smallScreenRenderer = new B62TTMLRenderer({
     mediaElement: smallScreenMedia,
     overlayElement: smallScreenOverlay,
-    fallbackStrokeColor: false
+    fallbackStrokeColor: false,
+    smallScreenScale: true
 });
 smallScreenRenderer.push({packetId: 10, text: smallScreenText});
 const smallScreenBlocks = smallScreenOverlay.querySelectorAll('.ttml-subtitle-block');
@@ -364,21 +365,21 @@ document.body.append(exactTinyMedia, exactTinyOverlay);
 const exactTinyRenderer = new B62TTMLRenderer({
     mediaElement: exactTinyMedia,
     overlayElement: exactTinyOverlay,
-    fallbackStrokeColor: false,
-    smallScreenScale: false
+    fallbackStrokeColor: false
 });
 exactTinyRenderer.push({packetId: 11, text: smallScreenText});
 const exactTinyBlocks = exactTinyOverlay.querySelectorAll('.ttml-subtitle-block');
 const exactReadingFontSize = parseFloat(exactTinyBlocks[0].querySelector('span').style.fontSize);
 const exactMainFontSize = parseFloat(exactTinyBlocks[1].querySelector('span').style.fontSize);
-assert(Math.abs(exactReadingFontSize - 7.2) < 0.1, 'exact scaling must not clamp a 72px reading independently');
-assert(Math.abs(exactMainFontSize - 14.4) < 0.1, 'exact scaling must preserve the main-to-reading size ratio');
+assert(Math.abs(exactReadingFontSize - 7.2) < 0.1, 'default scaling must fit a 72px reading to the video plane');
+assert(Math.abs(exactMainFontSize - 14.4) < 0.1, 'default scaling must preserve the main-to-reading size ratio');
 exactTinyRenderer.destroy();
 
 const readableTinyRenderer = new B62TTMLRenderer({
     mediaElement: exactTinyMedia,
     overlayElement: exactTinyOverlay,
-    fallbackStrokeColor: false
+    fallbackStrokeColor: false,
+    smallScreenScale: true
 });
 readableTinyRenderer.push({packetId: 12, text: smallScreenText});
 const readableTinyBlocks = exactTinyOverlay.querySelectorAll('.ttml-subtitle-block');
