@@ -265,7 +265,15 @@ function ttmlPresentationGroupKey(node, groups, nextId) {
 
 function parseTTMLSpans(pNode, styles, inheritedStyle, regions) {
     const spans = [];
-    appendTTMLInlineSpans(pNode, styles, inheritedStyle, spans, regions || {}, null);
+    appendTTMLInlineSpans(
+        pNode,
+        styles,
+        inheritedStyle,
+        spans,
+        regions || {},
+        null,
+        hasARIBTTMLRubyAncestor(pNode)
+    );
     return spans;
 }
 
@@ -290,7 +298,7 @@ function inheritedInlineTTMLStyle(style) {
     return result;
 }
 
-function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, regions, regionContext) {
+function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, regions, regionContext, inheritedRuby) {
     if (!parentNode || !parentNode.childNodes) {
         return;
     }
@@ -305,7 +313,8 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
                     style: Object.assign({}, inheritedStyle),
                     region: regionContext && regionContext.region,
                     regionStyle: regionContext && regionContext.style,
-                    regionGroupId: regionContext && regionContext.groupId
+                    regionGroupId: regionContext && regionContext.groupId,
+                    isRuby: !!inheritedRuby
                 });
             }
             continue;
@@ -321,12 +330,21 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
                 style: Object.assign({}, inheritedStyle),
                 region: regionContext && regionContext.region,
                 regionStyle: regionContext && regionContext.style,
-                regionGroupId: regionContext && regionContext.groupId
+                regionGroupId: regionContext && regionContext.groupId,
+                isRuby: !!inheritedRuby
             });
             continue;
         }
         if (name !== 'span') {
-            appendTTMLInlineSpans(child, styles, inheritedStyle, spans, regions, regionContext);
+            appendTTMLInlineSpans(
+                child,
+                styles,
+                inheritedStyle,
+                spans,
+                regions,
+                regionContext,
+                inheritedRuby || !!getARIBTTMLAttr(child, 'ruby')
+            );
             continue;
         }
 
@@ -341,8 +359,9 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
         const regionStyle = region && region.style ?
             Object.assign({}, inheritedStyle, region.style) : inheritedStyle;
         const style = mergeTTMLStyleRefs(child, styles, regionStyle);
+        const isRuby = inheritedRuby || !!getARIBTTMLAttr(child, 'ruby');
         const beforeLength = spans.length;
-        appendTTMLInlineSpans(child, styles, style, spans, regions, nextRegionContext);
+        appendTTMLInlineSpans(child, styles, style, spans, regions, nextRegionContext, isRuby);
         if (spans.length === beforeLength) {
             const text = normalizeTTMLText(child.textContent || '');
             if (text !== '') {
@@ -351,7 +370,8 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
                     style: style,
                     region: region,
                     regionStyle: nextRegionContext && nextRegionContext.style,
-                    regionGroupId: nextRegionContext && nextRegionContext.groupId
+                    regionGroupId: nextRegionContext && nextRegionContext.groupId,
+                    isRuby: !!isRuby
                 });
             }
         }
@@ -371,6 +391,17 @@ function appendTTMLInlineSpans(parentNode, styles, inheritedStyle, spans, region
             }
         }
     }
+}
+
+function hasARIBTTMLRubyAncestor(node) {
+    let current = node;
+    while (current && current.nodeType === Node.ELEMENT_NODE && localName(current) !== 'body') {
+        if (getARIBTTMLAttr(current, 'ruby')) {
+            return true;
+        }
+        current = current.parentNode;
+    }
+    return false;
 }
 
 function collectTTMLBlockLogicalNodes(pNode) {

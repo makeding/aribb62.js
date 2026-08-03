@@ -147,6 +147,9 @@ const laterSpan = rubyBlocks.flatMap((block) => block.spans).find((span) => span
 assert(laterSpan.rubyAnnotations[0].text === 'before', 'annotation-before-base must resolve document-wide');
 const unresolved = rubyBlocks.flatMap((block) => block.spans).find((span) => span.text === 'unresolved');
 assert(!unresolved.rubyResolved, 'an unresolved ruby relation must remain ordinary visible text');
+const spanRuby = rubyBlocks.flatMap((block) => block.spans).find((span) => span.text === 'き');
+const blockRuby = rubyBlocks.flatMap((block) => block.spans).find((span) => span.text === '全体ルビ');
+assert(spanRuby.isRuby && blockRuby.isRuby, 'span and block ruby descendants must be classified as ruby');
 
 const styleMedia = document.createElement('video');
 Object.defineProperty(styleMedia, 'currentTime', {value: 0, writable: true});
@@ -160,6 +163,7 @@ const styleRenderer = new B62TTMLRenderer({
 styleRenderer.push({packetId: 3, text: styleAndRubyText});
 assert(styleOverlay.textContent.includes('き') && styleOverlay.textContent.includes('ぶん'), 'ruby annotations must not be removed from broadcaster layout');
 assert(styleOverlay.querySelectorAll('ruby').length === 0, 'TR-B39 ruby metadata must not force HTML ruby layout');
+assert(styleOverlay.querySelectorAll('[data-aribb62-ruby]').length > 0, 'ruby annotations must remain distinguishable in the DOM');
 const outlined = Array.from(styleOverlay.querySelectorAll('span')).find((span) => span.textContent === '基');
 assert(outlined.style.webkitTextStroke.includes('0.2px'), 'textOutline must retain subpixel plane scaling');
 assert(
@@ -293,7 +297,29 @@ const spanOnlyRenderer = new B62TTMLRenderer({mediaElement: spanOnlyMedia, overl
 spanOnlyRenderer.push({packetId: 6, text: spanOnlyRegionText});
 const spanOnly = spanOnlyOverlay.querySelector('[data-aribb62-region-group]');
 assert(Math.abs(spanOnly.getBoundingClientRect().left - spanOnlyOverlay.getBoundingClientRect().left - 4) < 1, 'a span-only region must use plane coordinates without the legacy fallback box');
+assert(spanOnly.style.textAlign === 'start', 'an explicit span region must start at its operation-position origin');
 spanOnlyRenderer.destroy();
+
+const defaultAlignmentText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+  <head><layout><region xml:id="default-align" tts:origin="0px 0px" tts:extent="1000px 200px"/></layout></head>
+  <body><div><p region="default-align" begin="0s" end="10s">centered by default</p></div></body>
+</tt>`;
+const defaultAlignmentMedia = document.createElement('video');
+Object.defineProperty(defaultAlignmentMedia, 'currentTime', {value: 0, writable: true});
+const defaultAlignmentOverlay = document.createElement('div');
+sizeOverlay(defaultAlignmentOverlay);
+document.body.append(defaultAlignmentMedia, defaultAlignmentOverlay);
+const defaultAlignmentRenderer = new B62TTMLRenderer({
+    mediaElement: defaultAlignmentMedia,
+    overlayElement: defaultAlignmentOverlay,
+    fallbackStrokeColor: false
+});
+defaultAlignmentRenderer.push({packetId: 9, text: defaultAlignmentText});
+const defaultAlignmentBlock = defaultAlignmentOverlay.querySelector('.ttml-subtitle-block');
+assert(defaultAlignmentBlock.style.textAlign === 'center', 'paragraph textAlign must default to the libaribcaption-compatible center');
+assert(defaultAlignmentBlock.style.alignItems === 'center', 'default paragraph flow must be centered inside its region');
+defaultAlignmentRenderer.destroy();
 
 const verticalRegionText = `
 <tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">

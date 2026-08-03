@@ -209,7 +209,10 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.fontKerning = 'none';
         blockElement.style.fontVariantEastAsian = 'full-width';
         blockElement.style.fontFeatureSettings = '"palt" 0, "pkna" 0';
-        const textAlign = block.style.textAlign || 'start';
+        // libaribcaption's B62 layout uses center as the paragraph default.
+        // Explicitly positioned span regions are reset to start below because
+        // their origin is an operation-position reference, not an alignment box.
+        const textAlign = block.style.textAlign || 'center';
         blockElement.style.textAlign = textAlign;
         blockElement.style.alignItems = mapTextAlignItems(textAlign);
         blockElement.style.justifyContent = mapDisplayAlign(region.displayAlign);
@@ -420,6 +423,7 @@ function renderTTMLSpanRegionGroupDOM(spans, scale, styleOptions, fontFaces, par
     const wrapper = document.createElement('span');
     wrapper.setAttribute('data-aribb62-region-group', first.regionGroupId);
     applyTTMLStyle(wrapper, first.regionStyle || {}, scale, {animationNames: animationNames});
+    wrapper.style.textAlign = 'start';
     applyFontFaceStack(wrapper, fontFaces, spans.map((span) => span.text || '').join(''));
     spans.forEach((span) => {
         const child = Object.assign({}, span, {
@@ -473,6 +477,9 @@ function renderTTMLSpanDOM(span, scale, styleOptions, fontFaces, parentRegion, a
     }
 
     const spanElement = document.createElement('span');
+    if (span.isRuby) {
+        spanElement.setAttribute('data-aribb62-ruby', '');
+    }
     applyTTMLStyle(spanElement, span.style, scale, {animationNames: animationNames});
     applyViewerStyle(spanElement, styleOptions, scale);
     applyFontFaceStack(spanElement, fontFaces, span.text);
