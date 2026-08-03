@@ -13,6 +13,7 @@ export interface B62TTMLRendererOptions {
   forceBackgroundColor?: string
   backgroundPadding?: string
   lineBackground?: boolean
+  smallScreenScale?: boolean | number
   outputRenderer?: B62OutputRenderer
 }
 
@@ -116,6 +117,7 @@ export interface B62TTMLSpanCue {
   rubyTargetIds?: string[]
   rubyResolved?: boolean
   rubyAnnotations?: B62TTMLRubyAssociation[]
+  isRuby?: boolean
   region?: object | null
   regionStyle?: Record<string, string> | null
   regionGroupId?: string | null

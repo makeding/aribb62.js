@@ -163,11 +163,15 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     const overlayHeight = viewport.height || 1;
     const planeWidth = cue.plane[0] || 3840;
     const planeHeight = cue.plane[1] || 2160;
-    const scale = Math.min(overlayWidth / planeWidth, overlayHeight / planeHeight);
+    const baseScale = Math.min(overlayWidth / planeWidth, overlayHeight / planeHeight);
+    const smallScreenScale = resolveSmallScreenScale(styleOptions, overlayHeight);
+    const scale = baseScale * smallScreenScale;
     const contentWidth = planeWidth * scale;
     const contentHeight = planeHeight * scale;
     const marginX = viewport.left + (overlayWidth - contentWidth) / 2;
-    const marginY = viewport.top + (overlayHeight - contentHeight) / 2;
+    const marginY = smallScreenScale > 1 ?
+        viewport.top + overlayHeight - contentHeight :
+        viewport.top + (overlayHeight - contentHeight) / 2;
     const mergedLineBackgrounds = [];
     const animationNames = cueAnimationNames(cue);
 
@@ -324,6 +328,22 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         finalizeTTMLFontWidths(blockElement);
     });
     appendMergedLineBackgroundLayer(overlay, mergedLineBackgrounds);
+}
+
+function resolveSmallScreenScale(styleOptions, viewportHeight) {
+    const option = styleOptions && styleOptions.smallScreenScale;
+    if (option === false) {
+        return 1;
+    }
+    if (Number.isFinite(option)) {
+        return Math.max(1, Math.min(2, option));
+    }
+    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+        return 1;
+    }
+    // Zoom the complete caption plane instead of clamping individual font
+    // sizes so separately positioned readings keep their registration.
+    return Math.max(1, Math.min(1.6, 640 / viewportHeight));
 }
 
 function appendMergedLineBackgroundLayer(overlay, backgrounds) {

@@ -41,11 +41,14 @@ const renderer = new aribb62js.B62TTMLRenderer({
   strokeWidth: 1.5,
   backgroundPadding: '0 0.08em',
   lineBackground: true,
+  smallScreenScale: true,
 })
 
 player.on(mpegts.Events.MMTS_SUBTITLE_DATA_ARRIVED, data => {
   renderer.push(data)
 })
 ```
+
+On video viewports shorter than 640 CSS pixels, the DOM renderer scales the complete caption plane up to `1.6x` and anchors it to the bottom center. This keeps separately positioned ARIB readings aligned with the main text while making both more legible. Set `smallScreenScale: false` for exact 1:1 plane fitting, or pass a number from `1` to `2` for a fixed accessibility scale.
 
 External B62 resources can be supplied on the push payload as `resources`, `subsamples`, `resourceMap`, or `resourcesBySubsample`. The resource index is the B60/B62 subsample number used by `subt://<index>`.

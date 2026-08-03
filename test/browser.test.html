@@ -158,7 +158,8 @@ sizeOverlay(styleOverlay);
 document.body.append(styleMedia, styleOverlay);
 const styleRenderer = new B62TTMLRenderer({
     mediaElement: styleMedia,
-    overlayElement: styleOverlay
+    overlayElement: styleOverlay,
+    smallScreenScale: false
 });
 styleRenderer.push({packetId: 3, text: styleAndRubyText});
 assert(styleOverlay.textContent.includes('き') && styleOverlay.textContent.includes('ぶん'), 'ruby annotations must not be removed from broadcaster layout');
@@ -233,7 +234,8 @@ document.body.append(animationMedia, animationOverlay);
 const animationRenderer = new B62TTMLRenderer({
     mediaElement: animationMedia,
     overlayElement: animationOverlay,
-    fallbackStrokeColor: false
+    fallbackStrokeColor: false,
+    smallScreenScale: false
 });
 animationRenderer.push({packetId: 4, text: scrollingText});
 const animationSpan = animationOverlay.querySelector('.ttml-subtitle-line > span');
@@ -293,7 +295,7 @@ Object.defineProperty(spanOnlyMedia, 'currentTime', {value: 0, writable: true});
 const spanOnlyOverlay = document.createElement('div');
 sizeOverlay(spanOnlyOverlay);
 document.body.append(spanOnlyMedia, spanOnlyOverlay);
-const spanOnlyRenderer = new B62TTMLRenderer({mediaElement: spanOnlyMedia, overlayElement: spanOnlyOverlay, fallbackStrokeColor: false});
+const spanOnlyRenderer = new B62TTMLRenderer({mediaElement: spanOnlyMedia, overlayElement: spanOnlyOverlay, fallbackStrokeColor: false, smallScreenScale: false});
 spanOnlyRenderer.push({packetId: 6, text: spanOnlyRegionText});
 const spanOnly = spanOnlyOverlay.querySelector('[data-aribb62-region-group]');
 assert(Math.abs(spanOnly.getBoundingClientRect().left - spanOnlyOverlay.getBoundingClientRect().left - 4) < 1, 'a span-only region must use plane coordinates without the legacy fallback box');
@@ -321,6 +323,38 @@ assert(defaultAlignmentBlock.style.textAlign === 'center', 'paragraph textAlign 
 assert(defaultAlignmentBlock.style.alignItems === 'center', 'default paragraph flow must be centered inside its region');
 defaultAlignmentRenderer.destroy();
 
+const smallScreenText = `
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" tts:extent="3840px 2160px">
+  <head><styling>
+    <style xml:id="main" tts:fontSize="144px 144px" tts:lineHeight="240px"/>
+    <style xml:id="reading" tts:fontSize="72px 72px" tts:lineHeight="120px"/>
+  </styling><layout>
+    <region xml:id="reading-region" tts:origin="1000px 1680px" tts:extent="480px 120px"/>
+    <region xml:id="main-region" tts:origin="680px 1800px" tts:extent="2400px 240px"/>
+  </layout></head>
+  <body><div><p region="reading-region" begin="0s" end="10s"><span style="reading">スキルブック</span></p>
+    <p region="main-region" begin="0s" end="10s"><span style="main">小画面でも読みやすい字幕</span></p></div></body>
+</tt>`;
+const smallScreenMedia = document.createElement('video');
+Object.defineProperty(smallScreenMedia, 'currentTime', {value: 0, writable: true});
+const smallScreenOverlay = document.createElement('div');
+smallScreenOverlay.style.position = 'relative';
+smallScreenOverlay.style.width = '910px';
+smallScreenOverlay.style.height = '512px';
+document.body.append(smallScreenMedia, smallScreenOverlay);
+const smallScreenRenderer = new B62TTMLRenderer({
+    mediaElement: smallScreenMedia,
+    overlayElement: smallScreenOverlay,
+    fallbackStrokeColor: false
+});
+smallScreenRenderer.push({packetId: 10, text: smallScreenText});
+const smallScreenBlocks = smallScreenOverlay.querySelectorAll('.ttml-subtitle-block');
+const readingFontSize = parseFloat(smallScreenBlocks[0].querySelector('span').style.fontSize);
+const mainFontSize = parseFloat(smallScreenBlocks[1].querySelector('span').style.fontSize);
+assert(readingFontSize >= 21 && mainFontSize >= 42, 'small-screen scaling must enlarge both readings and main text');
+assert(parseFloat(smallScreenBlocks[1].style.top) < 427, 'bottom anchoring must lift the final line away from controls');
+smallScreenRenderer.destroy();
+
 const verticalRegionText = `
 <tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
   <head><layout><region xml:id="vertical" tts:writingMode="tbrl" tts:origin="400px 40px" tts:extent="100px 200px"/></layout></head>
@@ -331,7 +365,7 @@ Object.defineProperty(verticalAnchorMedia, 'currentTime', {value: 0, writable: t
 const verticalAnchorOverlay = document.createElement('div');
 sizeOverlay(verticalAnchorOverlay);
 document.body.append(verticalAnchorMedia, verticalAnchorOverlay);
-const verticalAnchorRenderer = new B62TTMLRenderer({mediaElement: verticalAnchorMedia, overlayElement: verticalAnchorOverlay, fallbackStrokeColor: false});
+const verticalAnchorRenderer = new B62TTMLRenderer({mediaElement: verticalAnchorMedia, overlayElement: verticalAnchorOverlay, fallbackStrokeColor: false, smallScreenScale: false});
 verticalAnchorRenderer.push({packetId: 7, text: verticalRegionText});
 const verticalSpan = verticalAnchorOverlay.querySelector('[data-aribb62-region-group]');
 const verticalBlock = verticalSpan.getBoundingClientRect();

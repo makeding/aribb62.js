@@ -43,7 +43,8 @@ class B62TTMLRenderer {
             strokeWidthInPlane: Number.isFinite(options.strokeWidthInPlane) ? options.strokeWidthInPlane : null,
             forceBackgroundColor: options.forceBackgroundColor || '',
             backgroundPadding: options.backgroundPadding || '0.08em 0.08em',
-            lineBackground: !!options.lineBackground
+            lineBackground: !!options.lineBackground,
+            smallScreenScale: options.smallScreenScale === undefined ? true : options.smallScreenScale
         };
         this._outputRenderer = options.outputRenderer || new B62DOMRenderer();
         this._lastCueKey = null;
