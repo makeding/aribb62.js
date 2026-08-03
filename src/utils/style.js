@@ -365,7 +365,7 @@ export function keyframeStyleToCSS(style, scale) {
         const pair = parseTTMLLengthPair(style.fontSize, [3840, 2160]);
         const height = pair ? pair[1] : parseTTMLLength(style.fontSize, 2160);
         if (height !== null) {
-            declarations.push('font-size: ' + Math.max(10, height * scale) + 'px');
+            declarations.push('font-size: ' + height * scale + 'px');
         }
     }
     if (style.extent) {

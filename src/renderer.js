@@ -166,12 +166,15 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
     const baseScale = Math.min(overlayWidth / planeWidth, overlayHeight / planeHeight);
     const smallScreenScale = resolveSmallScreenScale(styleOptions, overlayHeight);
     const scale = baseScale * smallScreenScale;
-    const contentWidth = planeWidth * scale;
-    const contentHeight = planeHeight * scale;
-    const marginX = viewport.left + (overlayWidth - contentWidth) / 2;
+    const baseContentWidth = planeWidth * baseScale;
+    const baseContentHeight = planeHeight * baseScale;
+    const baseMarginX = viewport.left + (overlayWidth - baseContentWidth) / 2;
+    const baseMarginY = viewport.top + (overlayHeight - baseContentHeight) / 2;
+    const horizontalAnchor = cueHorizontalScaleAnchor(cue, planeWidth, planeHeight);
+    const marginX = baseMarginX + horizontalAnchor * (baseScale - scale);
     const marginY = smallScreenScale > 1 ?
-        viewport.top + overlayHeight - contentHeight :
-        viewport.top + (overlayHeight - contentHeight) / 2;
+        baseMarginY + planeHeight * (baseScale - scale) :
+        baseMarginY;
     const mergedLineBackgrounds = [];
     const animationNames = cueAnimationNames(cue);
 
@@ -207,8 +210,8 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.whiteSpace = 'pre-wrap';
         const hasMarquee = !!block.style.marquee || block.spans.some((span) => span.style && span.style.marquee);
         blockElement.style.overflow = 'hidden';
-        blockElement.style.fontSize = Math.max(14, 72 * scale) + 'px';
-        blockElement.style.lineHeight = Math.max(16, 90 * scale) + 'px';
+        blockElement.style.fontSize = 72 * scale + 'px';
+        blockElement.style.lineHeight = 90 * scale + 'px';
         blockElement.style.fontFamily = styleOptions.normalFont;
         blockElement.style.fontKerning = 'none';
         blockElement.style.fontVariantEastAsian = 'full-width';
@@ -343,7 +346,30 @@ function resolveSmallScreenScale(styleOptions, viewportHeight) {
     }
     // Zoom the complete caption plane instead of clamping individual font
     // sizes so separately positioned readings keep their registration.
-    return Math.max(1, Math.min(1.6, 640 / viewportHeight));
+    return Math.max(1, Math.min(2, 640 / viewportHeight));
+}
+
+function cueHorizontalScaleAnchor(cue, planeWidth, planeHeight) {
+    let left = Infinity;
+    let right = -Infinity;
+    const include = (region) => {
+        if (!region) {
+            return;
+        }
+        const origin = region.origin || [planeWidth * 0.1, planeHeight * 0.78];
+        const extent = region.extent || [planeWidth * 0.8, planeHeight * 0.16];
+        const regionLeft = ttmlRegionLeft(region, origin, extent);
+        left = Math.min(left, regionLeft);
+        right = Math.max(right, regionLeft + extent[0]);
+    };
+    (cue.blocks || []).forEach((block) => {
+        include(block.region);
+        (block.spans || []).forEach((span) => include(span.region));
+    });
+    if (!Number.isFinite(left) || !Number.isFinite(right)) {
+        return planeWidth / 2;
+    }
+    return (left + right) / 2 <= planeWidth / 2 ? left : right;
 }
 
 function appendMergedLineBackgroundLayer(overlay, backgrounds) {
@@ -607,13 +633,13 @@ function applyTTMLStyle(element, style, scale, options) {
         const fontSize = parseTTMLLengthPair(style.fontSize, [3840, 2160]);
         const height = fontSize ? fontSize[1] : parseTTMLLength(style.fontSize, 2160);
         if (height) {
-            element.style.fontSize = Math.max(10, height * scale) + 'px';
+            element.style.fontSize = height * scale + 'px';
         }
     }
     if (style.lineHeight) {
         const lineHeight = parseTTMLLength(style.lineHeight, 2160);
         if (lineHeight) {
-            element.style.lineHeight = Math.max(10, lineHeight * scale) + 'px';
+            element.style.lineHeight = lineHeight * scale + 'px';
         }
     }
     if (style.color) {

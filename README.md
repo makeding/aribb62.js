@@ -49,6 +49,6 @@ player.on(mpegts.Events.MMTS_SUBTITLE_DATA_ARRIVED, data => {
 })
 ```
 
-On video viewports shorter than 640 CSS pixels, the DOM renderer scales the complete caption plane up to `1.6x` and anchors it to the bottom center. This keeps separately positioned ARIB readings aligned with the main text while making both more legible. Set `smallScreenScale: false` for exact 1:1 plane fitting, or pass a number from `1` to `2` for a fixed accessibility scale.
+On video viewports shorter than 640 CSS pixels, the DOM renderer scales the complete caption plane up to `2x`. It anchors the plane vertically to the bottom and horizontally to the caption group's nearer edge, so separately positioned ARIB readings stay aligned with the main text without shifting a left- or right-side caption's near edge. Set `smallScreenScale: false` for exact 1:1 plane fitting, or pass a number from `1` to `2` for a fixed accessibility scale.
 
 External B62 resources can be supplied on the push payload as `resources`, `subsamples`, `resourceMap`, or `resourcesBySubsample`. The resource index is the B60/B62 subsample number used by `subt://<index>`.

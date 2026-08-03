@@ -352,8 +352,41 @@ const smallScreenBlocks = smallScreenOverlay.querySelectorAll('.ttml-subtitle-bl
 const readingFontSize = parseFloat(smallScreenBlocks[0].querySelector('span').style.fontSize);
 const mainFontSize = parseFloat(smallScreenBlocks[1].querySelector('span').style.fontSize);
 assert(readingFontSize >= 21 && mainFontSize >= 42, 'small-screen scaling must enlarge both readings and main text');
+assert(Math.abs(parseFloat(smallScreenBlocks[1].style.left) - 161.067) < 1, 'small-screen scaling must preserve a left-side caption origin');
 assert(parseFloat(smallScreenBlocks[1].style.top) < 427, 'bottom anchoring must lift the final line away from controls');
 smallScreenRenderer.destroy();
+
+const exactTinyMedia = document.createElement('video');
+Object.defineProperty(exactTinyMedia, 'currentTime', {value: 0, writable: true});
+const exactTinyOverlay = document.createElement('div');
+sizeOverlay(exactTinyOverlay);
+document.body.append(exactTinyMedia, exactTinyOverlay);
+const exactTinyRenderer = new B62TTMLRenderer({
+    mediaElement: exactTinyMedia,
+    overlayElement: exactTinyOverlay,
+    fallbackStrokeColor: false,
+    smallScreenScale: false
+});
+exactTinyRenderer.push({packetId: 11, text: smallScreenText});
+const exactTinyBlocks = exactTinyOverlay.querySelectorAll('.ttml-subtitle-block');
+const exactReadingFontSize = parseFloat(exactTinyBlocks[0].querySelector('span').style.fontSize);
+const exactMainFontSize = parseFloat(exactTinyBlocks[1].querySelector('span').style.fontSize);
+assert(Math.abs(exactReadingFontSize - 7.2) < 0.1, 'exact scaling must not clamp a 72px reading independently');
+assert(Math.abs(exactMainFontSize - 14.4) < 0.1, 'exact scaling must preserve the main-to-reading size ratio');
+exactTinyRenderer.destroy();
+
+const readableTinyRenderer = new B62TTMLRenderer({
+    mediaElement: exactTinyMedia,
+    overlayElement: exactTinyOverlay,
+    fallbackStrokeColor: false
+});
+readableTinyRenderer.push({packetId: 12, text: smallScreenText});
+const readableTinyBlocks = exactTinyOverlay.querySelectorAll('.ttml-subtitle-block');
+const readableTinyReading = parseFloat(readableTinyBlocks[0].querySelector('span').style.fontSize);
+const readableTinyMain = parseFloat(readableTinyBlocks[1].querySelector('span').style.fontSize);
+assert(readableTinyReading >= 14.3, 'very small screens must keep 72px readings legible');
+assert(readableTinyMain >= 28.7, 'very small screens must keep 144px main captions legible');
+readableTinyRenderer.destroy();
 
 const verticalRegionText = `
 <tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
