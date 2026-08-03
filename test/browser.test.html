@@ -389,10 +389,13 @@ assert(readableTinyMain >= 28.7, 'very small screens must keep 144px main captio
 readableTinyRenderer.destroy();
 
 const branchingBackgroundText = `
-<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" tts:extent="3840px 2160px">
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:arib-tt="http://www.arib.or.jp/ns/arib-tt" tts:extent="3840px 2160px">
   <head><styling>
-    <style xml:id="reading-bg" tts:fontSize="72px 72px" tts:lineHeight="120px" tts:backgroundColor="#00000080"/>
-    <style xml:id="main-bg" tts:fontSize="144px 144px" tts:lineHeight="240px" tts:backgroundColor="#00000080"/>
+    <style xml:id="reading-bg" tts:fontSize="72px 72px" tts:lineHeight="120px"
+      tts:backgroundColor="#00000080" arib-tt:letter-spacing="8px"/>
+    <style xml:id="main-bg" tts:fontSize="144px 144px" tts:lineHeight="240px"
+      tts:backgroundColor="#00000080" arib-tt:letter-spacing="16px"/>
   </styling><layout>
     <region xml:id="reading-a" tts:origin="1240px 1680px" tts:extent="160px 120px"/>
     <region xml:id="reading-b" tts:origin="1560px 1680px" tts:extent="160px 120px"/>
@@ -403,7 +406,7 @@ const branchingBackgroundText = `
     <p region="reading-a"><span style="reading-bg">いぶ</span></p>
     <p region="reading-b"><span style="reading-bg">くる</span></p>
     <p region="reading-c"><span style="reading-bg">きば</span></p>
-    <p region="main-bg-region"><span style="main-bg">燻り狂う牙の「技能の書」≫</span></p>
+    <p region="main-bg-region"><span style="main-bg">燻り狂う牙の技能の書です</span></p>
   </div></body>
 </tt>`;
 const branchingBackgroundMedia = document.createElement('video');
@@ -415,6 +418,7 @@ const branchingBackgroundRenderer = new B62TTMLRenderer({
     overlayElement: branchingBackgroundOverlay,
     fallbackStrokeColor: false,
     lineBackground: true,
+    backgroundPadding: '0',
     smallScreenScale: false
 });
 branchingBackgroundRenderer.push({packetId: 13, text: branchingBackgroundText});
@@ -422,6 +426,15 @@ const branchingBackgroundPath = branchingBackgroundOverlay.querySelector('.ttml-
 assert(branchingBackgroundPath, 'branching reading backgrounds must render in the SVG background layer');
 assert((branchingBackgroundPath.getAttribute('d').match(/\bM\b/g) || []).length === 4,
     'disjoint readings must remain separate background subpaths above the main line');
+const branchingBackgroundRects = Array.from(branchingBackgroundPath.getAttribute('d').matchAll(
+    /M\s+(-?[\d.]+)\s+(-?[\d.]+)\s+H\s+(-?[\d.]+)/g
+)).map((match) => ({left: Number(match[1]), top: Number(match[2]), right: Number(match[3])}));
+assert(Math.abs(branchingBackgroundRects[0].left - branchingBackgroundRects[3].left) < 0.01,
+    'a reading and main line with the same B62 origin must share the background left edge');
+assert(Math.abs((branchingBackgroundRects[0].right - branchingBackgroundRects[0].left) - 16) < 0.01,
+    'reading background width must use B62 character-cell advances');
+assert(Math.abs((branchingBackgroundRects[3].right - branchingBackgroundRects[3].left) - 192) < 0.01,
+    'main background width must use B62 character-cell advances');
 branchingBackgroundRenderer.destroy();
 
 const verticalRegionText = `

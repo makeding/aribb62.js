@@ -293,18 +293,28 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
                     parseTTMLColor(span.style.backgroundColor) : ''
             });
         }
+        blockElement.appendChild(line);
+        overlay.appendChild(blockElement);
+        finalizeTTMLFontWidths(blockElement);
         if (lineBackgroundColor) {
             if (styleOptions.lineBackground) {
                 blockElement.style.backgroundColor = '';
                 clearElementBackgrounds(line);
                 line.style.padding = normalizeLineBackgroundPadding(styleOptions.backgroundPadding);
-                mergedLineBackgrounds.push({
-                    element: line,
-                    color: lineBackgroundColor,
-                    groupKey: block.groupKey || 'group:default',
-                    writingMode: writingMode.writingMode || 'horizontal-tb',
-                    top: blockTop,
-                    height: resolveTTMLLineBoxHeight(block, scale)
+                const logicalBackgrounds = resolveTTMLLogicalLineBackgrounds(
+                    block, line, scale, blockLeft, blockTop, blockWidth,
+                    writingMode.writingMode || 'horizontal-tb'
+                );
+                (logicalBackgrounds.length > 0 ? logicalBackgrounds : [null]).forEach((rect) => {
+                    mergedLineBackgrounds.push({
+                        rect: rect,
+                        element: line,
+                        color: lineBackgroundColor,
+                        groupKey: block.groupKey || 'group:default',
+                        writingMode: writingMode.writingMode || 'horizontal-tb',
+                        top: blockTop,
+                        height: resolveTTMLLineBoxHeight(block, scale)
+                    });
                 });
             } else if (styleOptions.forceBackgroundColor) {
                 blockElement.style.backgroundColor = lineBackgroundColor;
@@ -326,9 +336,6 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
                 });
             });
         }
-        blockElement.appendChild(line);
-        overlay.appendChild(blockElement);
-        finalizeTTMLFontWidths(blockElement);
     });
     appendMergedLineBackgroundLayer(overlay, mergedLineBackgrounds);
 }
@@ -379,8 +386,17 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
     const overlayRect = overlay.getBoundingClientRect();
     const groups = new Map();
     backgrounds.forEach((background) => {
-        const rect = background.element.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
+        const measured = background.rect || (() => {
+            const elementRect = background.element.getBoundingClientRect();
+            return {
+                left: elementRect.left - overlayRect.left,
+                top: Number.isFinite(background.top) ? background.top : elementRect.top - overlayRect.top,
+                right: elementRect.right - overlayRect.left,
+                bottom: Number.isFinite(background.top) && Number.isFinite(background.height) ?
+                    background.top + background.height : elementRect.bottom - overlayRect.top
+            };
+        })();
+        if (measured.right <= measured.left || measured.bottom <= measured.top) {
             return;
         }
         const groupKey = [
@@ -392,11 +408,10 @@ function appendMergedLineBackgroundLayer(overlay, backgrounds) {
             groups.set(groupKey, {color: background.color, rects: []});
         }
         groups.get(groupKey).rects.push({
-            left: rect.left - overlayRect.left,
-            top: Number.isFinite(background.top) ? background.top : rect.top - overlayRect.top,
-            right: rect.right - overlayRect.left,
-            bottom: Number.isFinite(background.top) && Number.isFinite(background.height) ?
-                background.top + background.height : rect.bottom - overlayRect.top
+            left: measured.left,
+            top: measured.top,
+            right: measured.right,
+            bottom: measured.bottom
         });
     });
     if (groups.size === 0) {
@@ -436,6 +451,73 @@ function resolveTTMLLineBoxHeight(block, scale) {
     );
     const lineHeight = parseTTMLLength(blockLineHeight || spanLineHeight, 2160);
     return lineHeight !== null && lineHeight > 0 ? lineHeight * scale : null;
+}
+
+function resolveTTMLLogicalLineBackgrounds(block, lineElement, scale, blockLeft, blockTop, blockWidth, writingMode) {
+    if (writingMode !== 'horizontal-tb') {
+        return [];
+    }
+
+    const lines = [0];
+    let lineHeight = 0;
+    (block.spans || []).forEach((span) => {
+        const style = span.style || block.style || {};
+        const fontSize = resolveTTMLPlaneFontSize(style, block.style);
+        const spacing = parseTTMLLength(style.letterSpacing, 3840) || 0;
+        const spanLineHeight = parseTTMLLength(style.lineHeight, 2160);
+        lineHeight = Math.max(lineHeight, spanLineHeight || fontSize[1] * 1.25);
+        Array.from(String(span.text || '')).forEach((character) => {
+            if (character === '\n') {
+                lines.push(0);
+                return;
+            }
+            const codePoint = character.codePointAt(0);
+            const width = isARIBHalfwidthCharacter(codePoint) ? fontSize[0] / 2 : fontSize[0];
+            lines[lines.length - 1] += Math.max(1, width + spacing);
+        });
+    });
+    if (lineHeight <= 0) {
+        lineHeight = (resolveTTMLLineBoxHeight(block, 1) || 90);
+    }
+
+    const view = lineElement.ownerDocument && lineElement.ownerDocument.defaultView;
+    const computed = view && view.getComputedStyle ? view.getComputedStyle(lineElement) : null;
+    const paddingLeft = computed ? parseFloat(computed.paddingLeft) || 0 : 0;
+    const paddingRight = computed ? parseFloat(computed.paddingRight) || 0 : 0;
+    const paddingTop = computed ? parseFloat(computed.paddingTop) || 0 : 0;
+    const paddingBottom = computed ? parseFloat(computed.paddingBottom) || 0 : 0;
+    const textAlign = block.style && block.style.textAlign || 'center';
+
+    return lines.filter((width) => width > 0).map((width, index) => {
+        let offset = 0;
+        if (textAlign === 'center') {
+            offset = (blockWidth / scale - width) / 2;
+        } else if (textAlign === 'right' || textAlign === 'end') {
+            offset = blockWidth / scale - width;
+        }
+        return {
+            left: blockLeft + offset * scale - paddingLeft,
+            top: blockTop + index * lineHeight * scale - paddingTop,
+            right: blockLeft + (offset + width) * scale + paddingRight,
+            bottom: blockTop + (index + 1) * lineHeight * scale + paddingBottom
+        };
+    });
+}
+
+function resolveTTMLPlaneFontSize(style, fallbackStyle) {
+    const value = style && style.fontSize || fallbackStyle && fallbackStyle.fontSize;
+    const pair = parseTTMLLengthPair(value, [3840, 2160]);
+    if (pair) {
+        return pair;
+    }
+    const height = parseTTMLLength(value, 2160);
+    return height !== null ? [height, height] : [72, 72];
+}
+
+function isARIBHalfwidthCharacter(codePoint) {
+    return (codePoint !== 0 && (codePoint & 0xFFFFFF00) === 0) ||
+        (codePoint >= 0xFF61 && codePoint <= 0xFF9F) ||
+        (codePoint >= 0xFFE8 && codePoint <= 0xFFEE);
 }
 
 function resolveLineBackgroundColor(blockElement, block, styleOptions) {
