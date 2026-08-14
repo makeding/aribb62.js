@@ -17,6 +17,7 @@ import {
     formatTextCodePoints,
     previewTTMLCues
 } from './utils/text.js';
+import {decodeARIBTTMLExi} from './utils/exi.js';
 
 /*
  * ARIB-TTML subtitle parser/renderer for MMTS subtitle payloads.
@@ -324,11 +325,9 @@ class B62TTMLRenderer {
         const compressionType = Number(data.subtitleCompressionType === undefined ?
             data.compressionType : data.subtitleCompressionType);
         if (compressionType === 1 || compressionType === 2) {
-            if (!this._exiDecoder) {
-                return null;
-            }
             try {
-                const text = this._exiDecoder(bytes, compressionType);
+                const decoder = this._exiDecoder || decodeARIBTTMLExi;
+                const text = decoder(bytes, compressionType);
                 return typeof text === 'string' ? text : null;
             } catch (e) {
                 return null;
@@ -701,5 +700,5 @@ if (typeof window !== 'undefined') {
     window.aribb62js = aribb62js;
 }
 
-export { B62DOMRenderer, B62TTMLRenderer, TTMLRenderer };
+export { B62DOMRenderer, B62TTMLRenderer, decodeARIBTTMLExi, TTMLRenderer };
 export default aribb62js;

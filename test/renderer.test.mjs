@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import aribb62js, {B62DOMRenderer, B62TTMLRenderer, TTMLRenderer} from '../src/index.js';
+import aribb62js, {B62DOMRenderer, B62TTMLRenderer, TTMLRenderer} from '../dist/aribb62.js';
 
 assert.equal(TTMLRenderer, B62TTMLRenderer);
 assert.equal(aribb62js.B62TTMLRenderer, B62TTMLRenderer);

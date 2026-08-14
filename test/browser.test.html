@@ -12,7 +12,7 @@ addEventListener('unhandledrejection', (event) => {
 </script>
 <script type="module">
 import {parseARIBTTMLDocument} from '../src/parser.js';
-import {B62TTMLRenderer} from '../src/index.js';
+import {B62TTMLRenderer} from '../dist/aribb62.js';
 
 const assert = (condition, message) => {
     if (!condition) {
@@ -127,8 +127,16 @@ const exiRenderer = new B62TTMLRenderer({
 const exiResult = exiRenderer.push({subtitleCompressionType: 2, data: new Uint8Array([1])});
 assert(exiResult.documentKind === 'presentation' && exiResult.text.includes('EXI'),
     'compressed subtitle input must use the explicit EXI decoder');
-const missingExi = new B62TTMLRenderer().push({subtitleCompressionType: 1, data: new Uint8Array([1])});
-assert(missingExi.documentKind === 'invalid', 'compressed subtitle input without an EXI decoder must be rejected');
+const builtInExi = new B62TTMLRenderer().push({
+    subtitleCompressionType: 2,
+    data: new Uint8Array([128, 6, 90, 29, 29, 28, 14, 139, 203, 221, 221, 221, 203, 157, 204,
+        203, 155, 220, 153, 203, 219, 156, 203, 221, 29, 27, 91, 0, 221, 29, 40, 10, 196,
+        222, 200, 243, 64, 39, 12, 21, 21, 97, 36, 0])
+});
+assert(builtInExi.documentKind === 'presentation' && builtInExi.text.includes('EXI'),
+    'compressed subtitle input must use the built-in EXI decoder');
+const invalidExi = new B62TTMLRenderer().push({subtitleCompressionType: 1, data: new Uint8Array([1])});
+assert(invalidExi.documentKind === 'invalid', 'malformed schema-informed EXI must be rejected');
 const displayPolicyRenderer = new B62TTMLRenderer();
 displayPolicyRenderer.push({
     packetId: 7,

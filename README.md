@@ -4,7 +4,7 @@ ARIB STD-B62 / ARIB-TTML parser and browser renderer.
 
 This package accepts normalized B62 subtitle payloads from a demuxer and owns the ARIB-TTML parsing, presentation state, and browser rendering path.
 
-There is no build step. The package exports `src/index.js` directly as an ES module and also installs `window.aribb62js` when loaded in a browser.
+The published package exports the Rollup-built `dist/aribb62.js` ES module and also installs `window.aribb62js` when loaded in a browser. The ARIB-TTML schema-informed EXI grammar is generated from B62 Annex 1 and kept as a source asset at `src/grammar/arib-ttml.grs.json`; the build embeds it into the single distributable file. Run `npm run build` when working from the repository.
 
 Serve this directory with any static file server and open `/demo/`.
 
@@ -44,9 +44,10 @@ Pass B60 `resolution` as `subtitleResolution` when available. It uses the B60 va
 
 Pass B60 `operation_mode`, `display_mode`, and `compression_type` as `subtitleOperationMode`,
 `subtitleDisplayMode`, and `subtitleCompressionType`. Modes 8 and 15 use the access-unit time and ignore
-TTML document timing. For EXI-compressed documents (`compression_type` 1 or 2), provide a synchronous
-`exiDecoder(bytes, compressionType)` callback; compressed bytes are rejected when no decoder is configured.
-The demuxer should normally decode EXI before calling this package, or supply that callback at the host boundary.
+TTML document timing. EXI-compressed documents (`compression_type` 1 = schema-informed ARIB-TTML,
+`2` = schema-less) are decoded by the bundled decoder. A synchronous `exiDecoder(bytes, compressionType)`
+callback may still be supplied to override that path. `decodeARIBTTMLExi(bytes, compressionType)` is also
+exported for integrations that need the decoder directly.
 
 `arib-tt:border` is rendered as the four-sided enclosure around a character sequence. Viewer readability stroke (`forceStrokeColor` / `fallbackStrokeColor`) is a separate, non-ARIB presentation option.
 

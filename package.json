@@ -3,22 +3,24 @@
   "version": "0.1.13",
   "description": "ARIB STD-B62 / ARIB-TTML parser and browser renderer",
   "type": "module",
-  "main": "./src/index.js",
-  "module": "./src/index.js",
+  "main": "./dist/aribb62.js",
+  "module": "./dist/aribb62.js",
   "types": "./d.ts/index.d.ts",
   "files": [
-    "src",
+    "dist",
     "d.ts"
   ],
   "exports": {
     ".": {
       "types": "./d.ts/index.d.ts",
-      "import": "./src/index.js"
+      "import": "./dist/aribb62.js"
     }
   },
   "scripts": {
-    "test": "node test/index.mjs",
-    "test:browser": "node test/run-browser.mjs"
+    "build": "rollup -c",
+    "prepack": "npm run build",
+    "test": "npm run build && node test/index.mjs",
+    "test:browser": "npm run build && node test/run-browser.mjs"
   },
   "author": "huggy",
   "license": "MIT",
@@ -27,5 +29,11 @@
     "b62",
     "ttml",
     "subtitle"
-  ]
+  ],
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.62.4",
+    "@selfmadesystem/exificient.js": "^0.1.0-alpha.1"
+  }
 }

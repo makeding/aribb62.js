@@ -20,6 +20,8 @@ export interface B62TTMLRendererOptions {
   outputRenderer?: B62OutputRenderer
 }
 
+export declare function decodeARIBTTMLExi(data: Uint8Array | ArrayBuffer, compressionType: number): string
+
 export interface B62RenderContext {
   overlayElement: HTMLElement | null
   mediaElement: HTMLVideoElement | null
