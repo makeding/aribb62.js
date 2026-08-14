@@ -8,6 +8,20 @@ function trackKey(data) {
     return data && data.packetId !== undefined ? 'packet:' + data.packetId : 'default';
 }
 
+function trackKind(data) {
+    if (data && (data.trackKind === 'caption' || data.trackKind === 'superimpose')) {
+        return data.trackKind;
+    }
+    if (data && Number(data.subtitleType) === 1) {
+        return 'superimpose';
+    }
+    const componentTag = data && Number(data.componentTag);
+    if (Number.isInteger(componentTag) && (componentTag & 0xff) >= 0x38 && (componentTag & 0xff) <= 0x3f) {
+        return 'superimpose';
+    }
+    return 'caption';
+}
+
 function resourceScopeKey(data) {
     if (!data) {
         return 'default';
@@ -102,6 +116,7 @@ export class B62RendererStateMachine {
         return {
             eventId: this._eventCount,
             trackKey: nextTrackKey,
+            trackKind: trackKind(data),
             resourceScopeKey: resourceScopeKey(data),
             timelineEpochKey: nextEpochKey,
             hasExplicitTimelineEpoch: hasExplicitTimelineEpoch(data)
@@ -126,6 +141,7 @@ export class B62RendererStateMachine {
         const annotatedCues = cues.map((cue, index) => Object.assign({}, cue, {
             key: cue.key + ':event:' + transaction.eventId + ':' + index,
             trackKey: transaction.trackKey,
+            trackKind: transaction.trackKind,
             eventId: transaction.eventId,
             eventStart: start,
             resourceScopeKey: cue.resourceScopeKey || transaction.resourceScopeKey
@@ -223,7 +239,11 @@ export class B62RendererStateMachine {
         selectedByTrack.forEach((presentation) => {
             active.push(...selectActiveTTMLCues(presentation.cues, currentTime));
         });
-        return active.sort((a, b) => a.start - b.start || a.eventId - b.eventId);
+        return active.sort((a, b) =>
+            trackPlaneOrder(a.trackKind) - trackPlaneOrder(b.trackKind) ||
+            a.start - b.start ||
+            a.eventId - b.eventId
+        );
     }
 
     prune(currentTime) {
@@ -263,6 +283,13 @@ export class B62RendererStateMachine {
 
     clearPresentations() {
         this._presentations = [];
+    }
+
+    clearTrack(packetId) {
+        const key = trackKey({packetId: packetId});
+        this._presentations = this._presentations.filter((presentation) => presentation.trackKey !== key);
+        this._trackEpochs.delete(key);
+        this._clearTimelineOffsetsForTrack(key);
     }
 
     reset() {
@@ -367,10 +394,15 @@ export class B62RendererStateMachine {
 
 export const B62StateKeys = {
     trackKey,
+    trackKind,
     resourceScopeKey,
     timelineEpochKey
 };
 
 function hasExplicitTimelineEpoch(data) {
     return !!data && (Number.isFinite(data.videoRawDtsBase) || Number.isFinite(data.videoDtsBase));
+}
+
+function trackPlaneOrder(kind) {
+    return kind === 'superimpose' ? 1 : 0;
 }

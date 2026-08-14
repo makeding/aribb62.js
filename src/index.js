@@ -34,6 +34,10 @@ class B62TTMLRenderer {
         this._isLive = !!options.isLive;
         this._maxCues = options.maxCues || 300;
         this._state = new B62RendererStateMachine({ maxCues: this._maxCues });
+        this._trackVisibility = {
+            caption: options.captionVisible === undefined ? true : !!options.captionVisible,
+            superimpose: options.superimposeVisible === undefined ? true : !!options.superimposeVisible
+        };
         this._liveTimingDelay = Number.isFinite(options.liveTimingDelay) ? options.liveTimingDelay : 0.7;
         this._styleOptions = {
             normalFont: mergeFontFamilyStacks(options.normalFont || options.fontFamily || '', DEFAULT_ARIB_FONT_STACK),
@@ -165,6 +169,26 @@ class B62TTMLRenderer {
         this._clearOutput();
     }
 
+    clearTrack(packetId) {
+        this._state.clearTrack(packetId);
+        this._releaseUnusedResourceScopes();
+        this._invalidateScene();
+        this.render();
+    }
+
+    setTrackVisibility(trackKind, visible) {
+        if (trackKind !== 'caption' && trackKind !== 'superimpose') {
+            return;
+        }
+        const nextVisible = !!visible;
+        if (this._trackVisibility[trackKind] === nextVisible) {
+            return;
+        }
+        this._trackVisibility[trackKind] = nextVisible;
+        this._invalidateScene();
+        this.render();
+    }
+
     reset() {
         this.clear();
         this._state.reset();
@@ -250,7 +274,8 @@ class B62TTMLRenderer {
         }
 
         const currentTime = mediaElement.currentTime || 0;
-        const cues = this._state.activeCues(currentTime);
+        const cues = this._state.activeCues(currentTime)
+            .filter((cue) => this._trackVisibility[cue.trackKind || 'caption'] !== false);
         const context = this._renderContext(cues);
         const key = cues.map((cue) => cue.key).join('|') || null;
         const layoutKey = this._layoutKey(overlay, mediaElement);
@@ -350,6 +375,7 @@ class B62TTMLRenderer {
         return {
             eventCount: this._state.eventCount,
             packetId: data && data.packetId,
+            trackKind: B62StateKeys.trackKind(data),
             documentKind: documentKind || (text ? 'presentation' : 'none'),
             cueCount: cues.length,
             cues: cues,
@@ -400,6 +426,11 @@ class B62TTMLRenderer {
         } else {
             this._overlay.innerHTML = '';
         }
+    }
+
+    _invalidateScene() {
+        this._lastCueKey = null;
+        this._lastLayoutKey = null;
     }
 
     _observeLayout() {

@@ -27,6 +27,12 @@ Document state follows the B62 presentation rules rather than treating every par
 - an empty `<tt></tt>` is recognized as the explicit clear command
 - in live mode, `end="indefinite"` content is continued only by a following `begin="indefinite"` element with the same `xml:id`
 - continued content keeps the old DOM/style and same-MPU resource scope while accepting the new end time
+- caption and superimpose packets keep independent presentation state; superimpose is always painted above caption
+
+Pass `trackKind: 'caption' | 'superimpose'` when the demuxer already knows the plane. The renderer also recognizes
+ARIB `subtitleType` (`0` caption, `1` superimpose) and component tags `0x30-0x37` / `0x38-0x3f`.
+`setTrackVisibility('caption', false)` hides selectable captions without suppressing superimpose, and
+`clearTrack(packetId)` retires one switched or discontinuous packet without disturbing the other plane.
 
 `arib-tt:border` is rendered as the four-sided enclosure around a character sequence. Viewer readability stroke (`forceStrokeColor` / `fallbackStrokeColor`) is a separate, non-ARIB presentation option.
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {B62RendererStateMachine} from '../src/utils/state.js';
+import {B62RendererStateMachine, B62StateKeys} from '../src/utils/state.js';
 
 function cue(key, start, end, clear = false) {
     return {key, start, end, clear, plane: [3840, 2160], blocks: []};
@@ -19,8 +19,8 @@ lifecycle.detachMedia();
 assert.equal(lifecycle.media, 'detached');
 
 const state = new B62RendererStateMachine();
-const captionTrack = {packetId: 62256, mpuSequenceNumber: 10};
-const superimposeTrack = {packetId: 62264, mpuSequenceNumber: 20};
+const captionTrack = {packetId: 62256, mpuSequenceNumber: 10, trackKind: 'caption'};
+const superimposeTrack = {packetId: 62264, mpuSequenceNumber: 20, trackKind: 'superimpose'};
 
 state.commitPresentation(state.beginPush(captionTrack), [cue('old', 0, 10)]);
 state.commitPresentation(state.beginPush(captionTrack), [cue('future', 2, 4)]);
@@ -31,13 +31,29 @@ assert.deepEqual(state.activeCues(1).map((item) => item.key), [
     'superimpose:event:3:0'
 ]);
 assert.deepEqual(state.activeCues(3).map((item) => item.key), [
-    'superimpose:event:3:0',
-    'future:event:2:0'
+    'future:event:2:0',
+    'superimpose:event:3:0'
 ]);
 // The newer presentation remains the state barrier after its own cue ends.
 assert.deepEqual(state.activeCues(5).map((item) => item.key), [
     'superimpose:event:3:0'
 ]);
+assert.equal(state.activeCues(3)[0].trackKind, 'caption');
+assert.equal(state.activeCues(3)[1].trackKind, 'superimpose');
+
+assert.equal(B62StateKeys.trackKind({trackKind: 'superimpose'}), 'superimpose');
+assert.equal(B62StateKeys.trackKind({subtitleType: 1}), 'superimpose');
+assert.equal(B62StateKeys.trackKind({componentTag: 0x38}), 'superimpose');
+assert.equal(B62StateKeys.trackKind({componentTag: 0x30}), 'caption');
+
+const trackClearState = new B62RendererStateMachine();
+trackClearState.commitPresentation(trackClearState.beginPush(captionTrack), [cue('caption', 0, 10)]);
+trackClearState.commitPresentation(trackClearState.beginPush({
+    ...superimposeTrack,
+    trackKind: 'superimpose'
+}), [cue('superimpose', 0, 10)]);
+trackClearState.clearTrack(captionTrack.packetId);
+assert.deepEqual(trackClearState.activeCues(1).map((item) => item.key), ['superimpose:event:2:0']);
 
 const clearState = new B62RendererStateMachine();
 clearState.commitPresentation(clearState.beginPush(captionTrack), [cue('indefinite', 0, Infinity)]);

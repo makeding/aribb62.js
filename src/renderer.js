@@ -200,7 +200,9 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         const writingMode = mapWritingMode(block.style.writingMode);
         const isHorizontalWriting = !writingMode.writingMode || writingMode.writingMode === 'horizontal-tb';
         const blockElement = document.createElement('div');
-        blockElement.className = 'ttml-subtitle-block';
+        const trackKind = cue.trackKind === 'superimpose' ? 'superimpose' : 'caption';
+        blockElement.className = 'ttml-subtitle-block ttml-' + trackKind + '-block';
+        blockElement.setAttribute('data-aribb62-track-kind', trackKind);
         blockElement.setAttribute('data-aribb62-cue-start', String(cue.start));
         blockElement.style.position = 'absolute';
         blockElement.style.display = 'flex';

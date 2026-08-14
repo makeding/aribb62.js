@@ -14,6 +14,8 @@ export interface B62TTMLRendererOptions {
   backgroundPadding?: string
   lineBackground?: boolean
   smallScreenScale?: boolean | number
+  captionVisible?: boolean
+  superimposeVisible?: boolean
   outputRenderer?: B62OutputRenderer
 }
 
@@ -57,6 +59,11 @@ export interface B62TTMLResource {
 
 export interface B62TTMLPushData {
   packetId?: number
+  trackKind?: 'caption' | 'superimpose'
+  componentTag?: number
+  subtitleType?: number
+  subtitleOperationMode?: number
+  subtitleDisplayMode?: number
   mpuSequenceNumber?: number
   pts?: number
   rawPts?: number
@@ -81,6 +88,7 @@ export interface B62TTMLPushData {
 export interface B62TTMLPushResult {
   eventCount: number
   packetId?: number
+  trackKind: 'caption' | 'superimpose'
   documentKind: 'none' | 'invalid' | 'clear' | 'presentation'
   cueCount: number
   cues: object[]
@@ -160,6 +168,7 @@ export interface B62TTMLCue {
   end: number
   clear: boolean
   trackKey?: string
+  trackKind?: 'caption' | 'superimpose'
   eventId?: number
   eventStart?: number
   resourceScopeKey?: string
@@ -182,6 +191,8 @@ export declare class B62TTMLRenderer {
   stopClock(): void
   destroy(): void
   clear(): void
+  clearTrack(packetId: number): void
+  setTrackVisibility(trackKind: 'caption' | 'superimpose', visible: boolean): void
   reset(): void
   push(data: B62TTMLPushData): B62TTMLPushResult
   render(): void

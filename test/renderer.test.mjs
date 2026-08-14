@@ -161,7 +161,11 @@ const outputRenderer = {
         renderedScenes.push({type: 'clear', cueCount: context.cues.length});
     },
     renderScene(context) {
-        renderedScenes.push({type: 'render', cueCount: context.cues.length});
+        renderedScenes.push({
+            type: 'render',
+            cueCount: context.cues.length,
+            trackKinds: context.cues.map((cue) => cue.trackKind)
+        });
     }
 };
 const outputMedia = {
@@ -178,6 +182,23 @@ const pluggableRenderer = new B62TTMLRenderer({
     outputRenderer: outputRenderer
 });
 assert.equal(renderedScenes.at(-1).type, 'render');
+pluggableRenderer._state.commitPresentation(
+    pluggableRenderer._state.beginPush({packetId: 1, trackKind: 'caption'}),
+    [{key: 'caption', start: 0, end: 10, blocks: [], plane: [3840, 2160]}]
+);
+pluggableRenderer._state.commitPresentation(
+    pluggableRenderer._state.beginPush({packetId: 2, trackKind: 'superimpose'}),
+    [{key: 'superimpose', start: 0, end: 10, blocks: [], plane: [3840, 2160]}]
+);
+outputMedia.currentTime = 1;
+pluggableRenderer.render();
+assert.deepEqual(renderedScenes.at(-1).trackKinds, ['caption', 'superimpose']);
+pluggableRenderer.setTrackVisibility('caption', false);
+assert.deepEqual(renderedScenes.at(-1).trackKinds, ['superimpose']);
+pluggableRenderer.setTrackVisibility('caption', true);
+assert.deepEqual(renderedScenes.at(-1).trackKinds, ['caption', 'superimpose']);
+pluggableRenderer.clearTrack(1);
+assert.deepEqual(renderedScenes.at(-1).trackKinds, ['superimpose']);
 pluggableRenderer.clear();
 assert.equal(renderedScenes.at(-1).type, 'clear');
 pluggableRenderer.destroy();
