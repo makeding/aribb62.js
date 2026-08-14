@@ -248,15 +248,12 @@ class B62TTMLRenderer {
             return this._buildPushResult(data, text, [], basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset, 'invalid');
         }
 
-        if (operationMode !== 0 && operationMode !== null) {
-            this._state.clearTrack(data && data.packetId);
-        }
-
         const continuedCues = isSubtitleLive(data, this._isLive) ?
             this._state.resolveContinuations(transaction, parsedDocument.continuations) : [];
         const cues = parsedDocument.cues.concat(continuedCues);
         let presentationCues;
-        if (parsedDocument.kind === 'clear') {
+        if (parsedDocument.kind === 'clear' ||
+            (operationMode !== 0 && operationMode !== null && cues.length === 0)) {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
             presentationCues = [{
                 key: 'clear:' + start,
