@@ -92,6 +92,15 @@ const invalidUtf8 = renderer.push({
 });
 assert(invalidUtf8.documentKind === 'invalid', 'malformed UTF-8 must be rejected');
 assert(renderer._state.activeCues(20).length === 1, 'malformed UTF-8 must leave the active presentation intact');
+renderer.push({packetId: 2, mpuSequenceNumber: 1, trackKind: 'superimpose', text: sourceText});
+const captionPlane = overlay.querySelector('[data-aribb62-track-plane="caption"]');
+const superimposePlane = overlay.querySelector('[data-aribb62-track-plane="superimpose"]');
+assert(captionPlane && superimposePlane, 'caption and superimpose must render into separate planes');
+assert(Number(superimposePlane.style.zIndex) > Number(captionPlane.style.zIndex),
+    'superimpose plane must be composited in front of the caption plane');
+assert(captionPlane.querySelector('.ttml-caption-block'), 'caption blocks must stay in the caption plane');
+assert(superimposePlane.querySelector('.ttml-superimpose-block'),
+    'superimpose blocks must stay in the superimpose plane');
 renderer.destroy();
 
 const verticalText = `

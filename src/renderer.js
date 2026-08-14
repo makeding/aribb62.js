@@ -52,10 +52,24 @@ export class B62DOMRenderer {
             return;
         }
         overlay.innerHTML = '';
+        const planes = new Map();
         (context.cues || []).forEach((cue) => {
             if (!cue.clear) {
+                const trackKind = cue.trackKind === 'superimpose' ? 'superimpose' : 'caption';
+                let plane = planes.get(trackKind);
+                if (!plane) {
+                    plane = document.createElement('div');
+                    plane.className = 'ttml-' + trackKind + '-plane';
+                    plane.setAttribute('data-aribb62-track-plane', trackKind);
+                    plane.style.position = 'absolute';
+                    plane.style.inset = '0';
+                    plane.style.pointerEvents = 'none';
+                    plane.style.zIndex = trackKind === 'superimpose' ? '1' : '0';
+                    planes.set(trackKind, plane);
+                    overlay.appendChild(plane);
+                }
                 renderTTMLCueDOM(
-                    overlay,
+                    plane,
                     cue,
                     context.styleOptions || {},
                     context.mediaElement || null
