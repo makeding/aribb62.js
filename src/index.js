@@ -222,7 +222,8 @@ class B62TTMLRenderer {
 
         const parsedDocument = parseARIBTTMLDocument(text, effectiveBasePts, currentTime, arrivalAligned, {
             resourceResolver: resources,
-            timelineOffset: timelineOffset
+            timelineOffset: timelineOffset,
+            subtitleResolution: data && data.subtitleResolution
         });
         if (parsedDocument.kind === 'invalid') {
             this._releaseUnusedResourceScopes();

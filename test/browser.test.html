@@ -56,6 +56,16 @@ const source = parseARIBTTMLDocument(sourceText, 0, 0, false);
 assert(source.cues.length === 1 && source.cues[0].end === Infinity, 'source indefinite cue');
 assert(source.cues[0].blocks[0].xmlId === 'p4', 'p xml:id must survive parsing');
 
+const resolutionSource = parseARIBTTMLDocument(
+    '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="0s"><span>4K</span></p></body></tt>',
+    0,
+    0,
+    false,
+    {subtitleResolution: 1}
+);
+assert(resolutionSource.cues[0].plane[0] === 3840 && resolutionSource.cues[0].plane[1] === 2160,
+    'B60 subtitle resolution must provide the initial TTML plane');
+
 const continuationText = `
 <tt xmlns="http://www.w3.org/ns/ttml">
   <body><div><p xml:id="p4" begin="indefinite" end="00:00:50.000"><span>replacement must be ignored</span></p></div></body>
@@ -70,6 +80,13 @@ const overlay = document.createElement('div');
 sizeOverlay(overlay);
 document.body.append(media, overlay);
 const renderer = new B62TTMLRenderer({mediaElement: media, overlayElement: overlay, isLive: true});
+const resolutionResult = renderer.push({
+    packetId: 3,
+    subtitleResolution: 2,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="0s"><span>8K</span></p></body></tt>'
+});
+assert(resolutionResult.cues[0].plane[0] === 7680 && resolutionResult.cues[0].plane[1] === 4320,
+    'renderer push must pass B60 subtitle resolution to TTML parsing');
 renderer.push({packetId: 1, mpuSequenceNumber: 1, text: sourceText});
 const widthWrapper = overlay.querySelector('[data-aribb62-font-width-ratio]');
 assert(widthWrapper, 'two-value fontSize must create a width-aware glyph wrapper');

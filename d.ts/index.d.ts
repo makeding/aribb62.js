@@ -64,6 +64,7 @@ export interface B62TTMLPushData {
   subtitleType?: number
   subtitleOperationMode?: number
   subtitleDisplayMode?: number
+  subtitleResolution?: number
   mpuSequenceNumber?: number
   pts?: number
   rawPts?: number

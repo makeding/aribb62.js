@@ -5,10 +5,21 @@
 import { getTTMLAttr } from './dom.js';
 import { formatNumber } from './text.js';
 
-export function parseTTMLPlane(ttNode) {
+export function parseTTMLPlane(ttNode, subtitleResolution) {
+    const fallback = b62ResolutionPlane(subtitleResolution) || [3840, 2160];
     const extent = getTTMLAttr(ttNode, 'extent');
-    const parsed = parseTTMLLengthPair(extent, [3840, 2160]);
-    return parsed || [3840, 2160];
+    const parsed = parseTTMLLengthPair(extent, fallback);
+    return parsed || fallback;
+}
+
+function b62ResolutionPlane(value) {
+    const planes = [
+        [1920, 1080],
+        [3840, 2160],
+        [7680, 4320]
+    ];
+    const index = Number(value);
+    return Number.isInteger(index) && index >= 0 && index < planes.length ? planes[index] : null;
 }
 
 export function parseTTMLLengthPair(value, plane) {

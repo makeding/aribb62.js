@@ -74,7 +74,7 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
         return {kind: 'presentation', cues: [], continuations: []};
     }
 
-    const plane = parseTTMLPlane(tt);
+    const plane = parseTTMLPlane(tt, options.subtitleResolution);
     const styles = collectTTMLStyles(doc);
     const regions = collectTTMLRegions(doc, styles, plane);
     const embeddedImages = collectTTMLEmbeddedImages(doc);
