@@ -51,13 +51,25 @@ export function parseTTMLLength(value, base) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function parseTTMLTime(value) {
+export function parseTTMLTime(value, options) {
     if (!value) {
         return null;
     }
     const text = String(value).trim();
     if (text === 'indefinite') {
         return Infinity;
+    }
+    options = options || {};
+    const frameRate = Number.isFinite(options.frameRate) && options.frameRate > 0 ? options.frameRate : 30;
+    const multiplier = Number.isFinite(options.frameRateMultiplier) && options.frameRateMultiplier > 0 ?
+        options.frameRateMultiplier : 1;
+    const tickRate = Number.isFinite(options.tickRate) && options.tickRate > 0 ? options.tickRate : 1;
+    const frames = text.match(/^(\d+):(\d{2}):(\d{2}):(\d+)(?:\.(\d+))?$/);
+    if (frames) {
+        const fps = frameRate * multiplier;
+        const subFrame = frames[5] ? Number('0.' + frames[5]) / fps : 0;
+        return Number(frames[1]) * 3600 + Number(frames[2]) * 60 + Number(frames[3]) +
+            (Number(frames[4]) + subFrame) / fps;
     }
     const clock = text.match(/^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/);
     if (clock) {
@@ -70,6 +82,14 @@ export function parseTTMLTime(value) {
     const millis = text.match(/^([0-9.]+)ms$/);
     if (millis) {
         return Number(millis[1]) / 1000;
+    }
+    const frameCount = text.match(/^([0-9.]+)f$/);
+    if (frameCount) {
+        return Number(frameCount[1]) / (frameRate * multiplier);
+    }
+    const tickCount = text.match(/^([0-9.]+)t$/);
+    if (tickCount) {
+        return Number(tickCount[1]) / tickRate;
     }
     return null;
 }

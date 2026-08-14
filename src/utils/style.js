@@ -182,11 +182,14 @@ export function mapTextAlignItems(value) {
 export function mapWritingMode(value) {
     switch (value) {
         case 'lrtb':
+        case 'lr':
         case 'horizontal-tb':
             return { writingMode: 'horizontal-tb', direction: 'ltr' };
         case 'rltb':
+        case 'rl':
             return { writingMode: 'horizontal-tb', direction: 'rtl' };
         case 'tblr':
+        case 'tb':
         case 'vertical-lr':
             return { writingMode: 'vertical-lr', direction: '' };
         case 'tbrl':

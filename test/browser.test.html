@@ -66,6 +66,37 @@ const resolutionSource = parseARIBTTMLDocument(
 assert(resolutionSource.cues[0].plane[0] === 3840 && resolutionSource.cues[0].plane[1] === 2160,
     'B60 subtitle resolution must provide the initial TTML plane');
 
+const frameTimed = parseARIBTTMLDocument(
+    '<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:timeBase="smpte" ttp:frameRate="30"><body><p begin="00:00:10:15" end="00:00:11:00">frame</p></body></tt>',
+    0,
+    0,
+    false,
+    {timelineOffset: 0}
+);
+assert(Math.abs(frameTimed.cues[0].start - 10.5) < 0.0001,
+    'SMPTE frame timing must use ttp frameRate');
+const mpuTimed = parseARIBTTMLDocument(
+    '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="99s" end="100s">MPU</p></body></tt>',
+    12,
+    12,
+    false,
+    {ignoreDocumentTiming: true}
+);
+assert(mpuTimed.cues[0].start === 12 && mpuTimed.cues[0].end === 17,
+    'MPU-only timing must ignore TTML document time');
+const extendedStyle = parseARIBTTMLDocument(
+    '<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"><body><p tts:display="none" tts:overflow="visible" tts:padding="4px" tts:showBackground="always" tts:unicodeBidi="embed" tts:visibility="hidden" tts:wrapOption="noWrap" tts:zIndex="4">style</p></body></tt>',
+    0,
+    0,
+    false
+);
+const extendedStyleValue = extendedStyle.cues[0].blocks[0].style;
+assert(extendedStyleValue.display === 'none' && extendedStyleValue.overflow === 'visible' &&
+    extendedStyleValue.padding === '4px' && extendedStyleValue.showBackground === 'always' &&
+    extendedStyleValue.unicodeBidi === 'embed' && extendedStyleValue.visibility === 'hidden' &&
+    extendedStyleValue.wrapOption === 'noWrap' && extendedStyleValue.zIndex === '4',
+    'B62 extended style properties must survive parsing');
+
 const continuationText = `
 <tt xmlns="http://www.w3.org/ns/ttml">
   <body><div><p xml:id="p4" begin="indefinite" end="00:00:50.000"><span>replacement must be ignored</span></p></div></body>
@@ -87,6 +118,40 @@ const resolutionResult = renderer.push({
 });
 assert(resolutionResult.cues[0].plane[0] === 7680 && resolutionResult.cues[0].plane[1] === 4320,
     'renderer push must pass B60 subtitle resolution to TTML parsing');
+const exiRenderer = new B62TTMLRenderer({
+    exiDecoder(bytes, compressionType) {
+        assert(bytes[0] === 0x01 && compressionType === 2, 'EXI decoder must receive the raw compressed sample');
+        return '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="0s">EXI</p></body></tt>';
+    }
+});
+const exiResult = exiRenderer.push({subtitleCompressionType: 2, data: new Uint8Array([1])});
+assert(exiResult.documentKind === 'presentation' && exiResult.text.includes('EXI'),
+    'compressed subtitle input must use the explicit EXI decoder');
+const missingExi = new B62TTMLRenderer().push({subtitleCompressionType: 1, data: new Uint8Array([1])});
+assert(missingExi.documentKind === 'invalid', 'compressed subtitle input without an EXI decoder must be rejected');
+const displayPolicyRenderer = new B62TTMLRenderer();
+displayPolicyRenderer.push({
+    packetId: 7,
+    subtitleDisplayMode: 1,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p>hidden by B60 playback DMF</p></body></tt>'
+});
+assert(displayPolicyRenderer._trackVisibility.caption === false,
+    'B60 automatic non-display playback mode must update the default visibility');
+const operationRenderer = new B62TTMLRenderer({isLive: true});
+operationRenderer.push({
+    packetId: 8,
+    mpuSequenceNumber: 1,
+    subtitleOperationMode: 0,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p xml:id="live" begin="0s" end="indefinite">live</p></body></tt>'
+});
+const segmentResult = operationRenderer.push({
+    packetId: 8,
+    mpuSequenceNumber: 2,
+    subtitleOperationMode: 1,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p xml:id="live" begin="indefinite" end="10s">must not continue</p></body></tt>'
+});
+assert(segmentResult.cues.length === 0 && operationRenderer._state.activeCues(1).length === 0,
+    'B60 segment mode must not inherit live continuations');
 renderer.push({packetId: 1, mpuSequenceNumber: 1, text: sourceText});
 const widthWrapper = overlay.querySelector('[data-aribb62-font-width-ratio]');
 assert(widthWrapper, 'two-value fontSize must create a width-aware glyph wrapper');

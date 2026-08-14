@@ -251,7 +251,9 @@ export function renderTTMLCueDOM(overlay, cue, styleOptions, mediaElement) {
         blockElement.style.top = blockTop + 'px';
         blockElement.style.width = blockWidth + 'px';
         blockElement.style.height = blockHeight + 'px';
-        blockElement.style.padding = '0';
+        if (!block.style.padding) {
+            blockElement.style.padding = '0';
+        }
         if (block.style.backgroundImageUrl) {
             blockElement.style.backgroundImage = 'url("' + cssEscapeUrl(block.style.backgroundImageUrl) + '")';
             blockElement.style.backgroundRepeat = 'no-repeat';
@@ -666,7 +668,7 @@ function applyTTMLSpanRegion(element, region, parentRegion, scale) {
     element.style.display = 'block';
     element.style.left = ((left - parentLeft) * scale) + 'px';
     element.style.top = ((origin[1] - parentOrigin[1]) * scale) + 'px';
-    element.style.overflow = 'hidden';
+    element.style.overflow = region.style && region.style.overflow ? region.style.overflow : 'hidden';
     const writingMode = mapWritingMode(region.style && region.style.writingMode);
     if (writingMode.writingMode) {
         element.style.writingMode = writingMode.writingMode;
@@ -746,6 +748,27 @@ function applyTTMLStyle(element, style, scale, options) {
     if (style.backgroundColor) {
         element.style.backgroundColor = parseTTMLColor(style.backgroundColor);
     }
+    if (style.display) {
+        element.style.display = style.display === 'auto' ? '' : style.display;
+    }
+    if (style.overflow) {
+        element.style.overflow = style.overflow;
+    }
+    if (style.padding) {
+        element.style.padding = scaleTTMLPadding(style.padding, scale);
+    }
+    if (style.unicodeBidi) {
+        element.style.unicodeBidi = style.unicodeBidi === 'bidiOverride' ? 'bidi-override' : style.unicodeBidi;
+    }
+    if (style.visibility) {
+        element.style.visibility = style.visibility;
+    }
+    if (style.wrapOption) {
+        element.style.whiteSpace = style.wrapOption === 'noWrap' ? 'nowrap' : 'pre-wrap';
+    }
+    if (style.zIndex) {
+        element.style.zIndex = style.zIndex;
+    }
     if (style.fontWeight) {
         element.style.fontWeight = style.fontWeight;
     }
@@ -785,7 +808,7 @@ function applyTTMLStyle(element, style, scale, options) {
             element.style.letterSpacing = (spacing * scale) + 'px';
         }
     }
-    if (style.opacity) {
+    if (style.opacity !== undefined && style.opacity !== '') {
         element.style.opacity = String(style.opacity);
     }
     if (!options.skipBorder) {
@@ -800,6 +823,27 @@ function applyTTMLStyle(element, style, scale, options) {
     if (style.marquee && !options.skipMarquee) {
         applyARIBMarquee(element, style.marquee, style.writingMode);
     }
+}
+
+function scaleTTMLPadding(value, scale) {
+    const parts = String(value).trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0 || parts.length > 4) {
+        return value;
+    }
+    const values = parts.map((part) => {
+        const parsed = parseTTMLLength(part, 3840);
+        return parsed === null ? part : (parsed * scale) + 'px';
+    });
+    if (values.length === 1) {
+        return values[0];
+    }
+    if (values.length === 2) {
+        return values[0] + ' ' + values[1];
+    }
+    if (values.length === 3) {
+        return values[0] + ' ' + values[1] + ' ' + values[2];
+    }
+    return values.join(' ');
 }
 
 function cueAnimationNames(cue) {

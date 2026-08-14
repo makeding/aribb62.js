@@ -16,6 +16,7 @@ export interface B62TTMLRendererOptions {
   smallScreenScale?: boolean | number
   captionVisible?: boolean
   superimposeVisible?: boolean
+  exiDecoder?: (data: Uint8Array, compressionType: number) => string
   outputRenderer?: B62OutputRenderer
 }
 
@@ -64,6 +65,8 @@ export interface B62TTMLPushData {
   subtitleType?: number
   subtitleOperationMode?: number
   subtitleDisplayMode?: number
+  subtitleCompressionType?: number
+  compressionType?: number
   subtitleResolution?: number
   mpuSequenceNumber?: number
   pts?: number

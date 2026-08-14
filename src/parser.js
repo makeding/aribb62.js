@@ -37,9 +37,9 @@ export function findTTMLMinStart(text) {
     let minStart = null;
     const collectStart = (node) => {
         const timingNode = nearestTimedNode(node);
-        let start = parseTTMLTime(getTTMLAttr(node, 'begin'));
+        let start = parseTTMLTime(getTTMLAttr(node, 'begin'), timeOptions(doc.documentElement));
         if (start === null && timingNode) {
-            start = parseTTMLTime(getTTMLAttr(timingNode, 'begin'));
+            start = parseTTMLTime(getTTMLAttr(timingNode, 'begin'), timeOptions(doc.documentElement));
         }
         if (Number.isFinite(start) && (minStart === null || start < minStart)) {
             minStart = start;
@@ -75,6 +75,7 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
     }
 
     const plane = parseTTMLPlane(tt, options.subtitleResolution);
+    const timingOptions = timeOptions(tt);
     const styles = collectTTMLStyles(doc);
     const regions = collectTTMLRegions(doc, styles, plane);
     const embeddedImages = collectTTMLEmbeddedImages(doc);
@@ -90,23 +91,23 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
     pNodes.forEach((pNode, index) => {
         const timingNode = nearestTimedNode(pNode);
         const beginValue = getTTMLAttr(pNode, 'begin');
-        let rawStart = parseTTMLTime(beginValue);
-        let rawEnd = parseTTMLTime(getTTMLAttr(pNode, 'end'));
-        let rawDur = parseTTMLTime(getTTMLAttr(pNode, 'dur'));
+        let rawStart = options.ignoreDocumentTiming ? null : parseTTMLTime(beginValue, timingOptions);
+        let rawEnd = options.ignoreDocumentTiming ? null : parseTTMLTime(getTTMLAttr(pNode, 'end'), timingOptions);
+        let rawDur = options.ignoreDocumentTiming ? null : parseTTMLTime(getTTMLAttr(pNode, 'dur'), timingOptions);
         if (rawStart === null && timingNode) {
-            rawStart = parseTTMLTime(getTTMLAttr(timingNode, 'begin'));
+            rawStart = options.ignoreDocumentTiming ? null : parseTTMLTime(getTTMLAttr(timingNode, 'begin'), timingOptions);
         }
         if (rawEnd === null && timingNode) {
-            rawEnd = parseTTMLTime(getTTMLAttr(timingNode, 'end'));
+            rawEnd = options.ignoreDocumentTiming ? null : parseTTMLTime(getTTMLAttr(timingNode, 'end'), timingOptions);
         }
         if (rawDur === null && timingNode) {
-            rawDur = parseTTMLTime(getTTMLAttr(timingNode, 'dur'));
+            rawDur = options.ignoreDocumentTiming ? null : parseTTMLTime(getTTMLAttr(timingNode, 'dur'), timingOptions);
         }
         if (rawEnd === null && rawDur !== null && rawStart !== null) {
             rawEnd = rawDur === Infinity ? Infinity : rawStart + rawDur;
         }
 
-        if (String(beginValue || '').trim() === 'indefinite') {
+        if (!options.ignoreDocumentTiming && String(beginValue || '').trim() === 'indefinite') {
             const id = getXMLId(pNode);
             if (id) {
                 rawContinuations.push({id: id, rawEnd: rawEnd, rawDur: rawDur});
@@ -148,9 +149,9 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
             return;
         }
         const timingNode = nearestTimedNode(audioNode);
-        let rawStart = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'begin')) : null;
-        let rawEnd = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'end')) : null;
-        const rawDur = timingNode ? parseTTMLTime(getTTMLAttr(timingNode, 'dur')) : null;
+        let rawStart = timingNode && !options.ignoreDocumentTiming ? parseTTMLTime(getTTMLAttr(timingNode, 'begin'), timingOptions) : null;
+        let rawEnd = timingNode && !options.ignoreDocumentTiming ? parseTTMLTime(getTTMLAttr(timingNode, 'end'), timingOptions) : null;
+        const rawDur = timingNode && !options.ignoreDocumentTiming ? parseTTMLTime(getTTMLAttr(timingNode, 'dur'), timingOptions) : null;
         if (rawEnd === null && rawDur !== null && rawStart !== null) {
             rawEnd = rawDur === Infinity ? Infinity : rawStart + rawDur;
         }
@@ -233,6 +234,19 @@ function isEmptyTTMLDocument(tt) {
         }
     }
     return true;
+}
+
+function timeOptions(tt) {
+    const frameRate = Number(getTTMLAttr(tt, 'frameRate'));
+    const tickRate = Number(getTTMLAttr(tt, 'tickRate'));
+    const multiplier = String(getTTMLAttr(tt, 'frameRateMultiplier') || '').trim().split(/\s+/).map(Number);
+    return {
+        timeBase: getTTMLAttr(tt, 'timeBase') || 'media',
+        frameRate: Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30,
+        frameRateMultiplier: multiplier.length === 2 && multiplier.every(Number.isFinite) && multiplier[1] > 0 ?
+            multiplier[0] / multiplier[1] : 1,
+        tickRate: Number.isFinite(tickRate) && tickRate > 0 ? tickRate : 1
+    };
 }
 
 function offsetTTMLContinuations(continuations, offset) {
@@ -562,9 +576,11 @@ function mergeTTMLStyleRefs(node, styles, base) {
 
     const attrs = [
         'fontSize', 'lineHeight', 'fontWeight', 'fontStyle', 'fontFamily',
-        'color', 'backgroundColor', 'displayAlign', 'textAlign',
+        'color', 'backgroundColor', 'display', 'displayAlign',
+        'overflow', 'padding', 'showBackground', 'textAlign',
         'textDecoration', 'textShadow', 'backgroundImage', 'writingMode',
-        'direction', 'extent', 'opacity', 'origin', 'textOutline'
+        'direction', 'extent', 'opacity', 'origin', 'textOutline',
+        'unicodeBidi', 'visibility', 'wrapOption', 'zIndex'
     ];
     attrs.forEach((name) => {
         const value = getTTMLAttr(node, name);

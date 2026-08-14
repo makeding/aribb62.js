@@ -10,14 +10,16 @@ Serve this directory with any static file server and open `/demo/`.
 
 Implemented renderer basics:
 
-- TTML timing, regions, color, one- and two-value font size, line height, and display alignment
-- ARIB-TTML `writingMode` mapping for horizontal and vertical captions
+- TTML timing, including SMPTE frame and tick expressions, regions, color, one- and two-value font size, line height, and display alignment
+- ARIB-TTML `writingMode` mapping for horizontal, vertical, and short-form `lr` / `rl` / `tb` captions
+- B62 styling attributes including display, overflow, padding, visibility, wrapping, bidi, and z-index
 - ARIB-TTML `arib-tt:ruby` associations on `div`, `p`, and `span` through same-document `xml:id` references
 - `smpte:backgroundImage` with embedded `smpte:image` or same-MPU `subt://n` resources
 - `arib-tt:font-face` with same-MPU `subt://n` font resources
 - ARIB-TTML extension CSS mapping for `arib-tt:border`, `arib-tt:letter-spacing`, `arib-tt:text-shadow`, `arib-tt:marquee`, `arib-tt:keyframes`, and `arib-tt:animation`
 - TR-B39 span-level regions, fixed overflow clipping, media-clock animation synchronization, and absolute keyframe-origin mapping
-- `dur` and `indefinite` timing for live-mode continued presentation
+- `dur` and `indefinite` timing for B60 live-mode continued presentation; segment/program updates retire the previous track state
+- B60 display-mode defaults for automatic display and automatic non-display
 - `arib-tt:audio` metadata extraction (`romsound://n` and `subt://n` are exposed, playback is left to the host)
 - UTF-8 text with LF/TAB preserved for browser `pre-wrap` rendering
 
@@ -39,6 +41,12 @@ superimpose track.
 
 Pass B60 `resolution` as `subtitleResolution` when available. It uses the B60 values `0` = 1920×1080,
 `1` = 3840×2160, and `2` = 7680×4320 when the TTML document does not provide `tts:extent`.
+
+Pass B60 `operation_mode`, `display_mode`, and `compression_type` as `subtitleOperationMode`,
+`subtitleDisplayMode`, and `subtitleCompressionType`. Modes 8 and 15 use the access-unit time and ignore
+TTML document timing. For EXI-compressed documents (`compression_type` 1 or 2), provide a synchronous
+`exiDecoder(bytes, compressionType)` callback; compressed bytes are rejected when no decoder is configured.
+The demuxer should normally decode EXI before calling this package, or supply that callback at the host boundary.
 
 `arib-tt:border` is rendered as the four-sided enclosure around a character sequence. Viewer readability stroke (`forceStrokeColor` / `fallbackStrokeColor`) is a separate, non-ARIB presentation option.
 

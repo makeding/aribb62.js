@@ -32,11 +32,16 @@ class B62TTMLRenderer {
         this._overlay = options.overlayElement || null;
         this._mediaElement = options.mediaElement || null;
         this._isLive = !!options.isLive;
+        this._exiDecoder = typeof options.exiDecoder === 'function' ? options.exiDecoder : null;
         this._maxCues = options.maxCues || 300;
         this._state = new B62RendererStateMachine({ maxCues: this._maxCues });
         this._trackVisibility = {
             caption: options.captionVisible === undefined ? true : !!options.captionVisible,
             superimpose: options.superimposeVisible === undefined ? true : !!options.superimposeVisible
+        };
+        this._trackVisibilityExplicit = {
+            caption: options.captionVisible !== undefined,
+            superimpose: options.superimposeVisible !== undefined
         };
         this._liveTimingDelay = Number.isFinite(options.liveTimingDelay) ? options.liveTimingDelay : 0.7;
         this._styleOptions = {
@@ -185,6 +190,7 @@ class B62TTMLRenderer {
             return;
         }
         this._trackVisibility[trackKind] = nextVisible;
+        this._trackVisibilityExplicit[trackKind] = true;
         this._invalidateScene();
         this.render();
     }
@@ -201,6 +207,7 @@ class B62TTMLRenderer {
         if (!transaction) {
             return this._buildPushResult(data, '', [], null, null, false, null, null);
         }
+        this._applySubtitleDisplayMode(data);
         const text = this._decodeText(data);
         const resources = this._prepareResourceContext(data, transaction.resourceScopeKey);
 
@@ -218,19 +225,33 @@ class B62TTMLRenderer {
         const basePts = this._basePts(data);
         const effectiveBasePts = basePts;
         const arrivalAligned = false;
-        const timelineOffset = this._resolveTimelineOffset(data, text, effectiveBasePts, this._timelineAnchor(data));
+        const operationMode = subtitleOperationMode(data);
+        const timingMode = Number(data && data.subtitleTimingMode);
+        const ignoreDocumentTiming = timingMode === 8 || timingMode === 15;
+        const timelineOffset = this._resolveTimelineOffset(
+            data,
+            text,
+            effectiveBasePts,
+            this._timelineAnchor(data),
+            ignoreDocumentTiming
+        );
 
         const parsedDocument = parseARIBTTMLDocument(text, effectiveBasePts, currentTime, arrivalAligned, {
             resourceResolver: resources,
             timelineOffset: timelineOffset,
-            subtitleResolution: data && data.subtitleResolution
+            subtitleResolution: data && data.subtitleResolution,
+            ignoreDocumentTiming: ignoreDocumentTiming
         });
         if (parsedDocument.kind === 'invalid') {
             this._releaseUnusedResourceScopes();
             return this._buildPushResult(data, text, [], basePts, effectiveBasePts, arrivalAligned, resources, timelineOffset, 'invalid');
         }
 
-        const continuedCues = this._isLive ?
+        if (operationMode !== 0 && operationMode !== null) {
+            this._state.clearTrack(data && data.packetId);
+        }
+
+        const continuedCues = isSubtitleLive(data, this._isLive) ?
             this._state.resolveContinuations(transaction, parsedDocument.continuations) : [];
         const cues = parsedDocument.cues.concat(continuedCues);
         let presentationCues;
@@ -295,12 +316,30 @@ class B62TTMLRenderer {
         if (data && data.text) {
             return data.text;
         }
-        if (!data || !data.data || typeof TextDecoder === 'undefined') {
+        if (!data || !data.data) {
+            return '';
+        }
+
+        const bytes = toUint8Array(data.data);
+        const compressionType = Number(data.subtitleCompressionType === undefined ?
+            data.compressionType : data.subtitleCompressionType);
+        if (compressionType === 1 || compressionType === 2) {
+            if (!this._exiDecoder) {
+                return null;
+            }
+            try {
+                const text = this._exiDecoder(bytes, compressionType);
+                return typeof text === 'string' ? text : null;
+            } catch (e) {
+                return null;
+            }
+        }
+        if (typeof TextDecoder === 'undefined') {
             return '';
         }
 
         try {
-            return new TextDecoder('utf-8', {fatal: true}).decode(data.data);
+            return new TextDecoder('utf-8', {fatal: true}).decode(bytes);
         } catch (e) {
             return null;
         }
@@ -320,7 +359,10 @@ class B62TTMLRenderer {
         return 0;
     }
 
-    _resolveTimelineOffset(data, text, basePts, fallbackAnchor) {
+    _resolveTimelineOffset(data, text, basePts, fallbackAnchor, ignoreDocumentTiming) {
+        if (ignoreDocumentTiming) {
+            return basePts !== null ? basePts : fallbackAnchor;
+        }
         const minStart = findTTMLMinStart(text);
         if (data &&
             data.subtitleTimingMode === 2 &&
@@ -354,6 +396,21 @@ class B62TTMLRenderer {
             this._state.setTimelineOffset(key, timelineOffset);
         }
         return timelineOffset;
+    }
+
+    _applySubtitleDisplayMode(data) {
+        const trackKind = data && data.trackKind === 'superimpose' ? 'superimpose' :
+            Number(data && data.subtitleType) === 1 ? 'superimpose' : 'caption';
+        const mode = Number(data && data.subtitleDisplayMode);
+        if (!Number.isInteger(mode) || mode < 0 || mode > 15 || this._trackVisibilityExplicit[trackKind]) {
+            return;
+        }
+        const playbackMode = mode & 0x03;
+        if (playbackMode === 0) {
+            this._trackVisibility[trackKind] = true;
+        } else if (playbackMode === 1) {
+            this._trackVisibility[trackKind] = false;
+        }
     }
 
     _currentTime() {
@@ -603,6 +660,29 @@ class B62TTMLRenderer {
     _clearResourceUrls() {
         Array.from(this._resourceScopes.keys()).forEach((scopeKey) => this._clearResourceScope(scopeKey));
     }
+}
+
+function subtitleOperationMode(data) {
+    const value = Number(data && data.subtitleOperationMode);
+    return Number.isInteger(value) && value >= 0 && value <= 2 ? value : null;
+}
+
+function isSubtitleLive(data, defaultLive) {
+    const mode = subtitleOperationMode(data);
+    return mode === 0 || (mode === null && defaultLive);
+}
+
+function toUint8Array(data) {
+    if (data instanceof Uint8Array) {
+        return data;
+    }
+    if (data instanceof ArrayBuffer) {
+        return new Uint8Array(data);
+    }
+    if (ArrayBuffer.isView(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    }
+    return new Uint8Array(data);
 }
 
 

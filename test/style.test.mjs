@@ -6,6 +6,8 @@ import {
     parseARIBAnimation,
     parseTTMLTextStroke
 } from '../src/utils/style.js';
+import {mapWritingMode} from '../src/utils/style.js';
+import {parseTTMLTime} from '../src/utils/ttml.js';
 
 const borderElement = {style: {}};
 applyTTMLBorder(borderElement, {
@@ -62,5 +64,11 @@ assert.deepEqual(
         'transform: translate(calc(85px - var(--aribb62-origin-x, 0px)), calc(10px - var(--aribb62-origin-y, 0px)))'
     ]
 );
+assert.deepEqual(mapWritingMode('lr'), {writingMode: 'horizontal-tb', direction: 'ltr'});
+assert.deepEqual(mapWritingMode('rl'), {writingMode: 'horizontal-tb', direction: 'rtl'});
+assert.deepEqual(mapWritingMode('tb'), {writingMode: 'vertical-lr', direction: ''});
+assert.equal(parseTTMLTime('00:00:10:15', {frameRate: 30}), 10.5);
+assert.equal(parseTTMLTime('30f', {frameRate: 30}), 1);
+assert.equal(parseTTMLTime('100t', {tickRate: 1000}), 0.1);
 
 console.log('ARIB border and marquee mapping: ok');
