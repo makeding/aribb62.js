@@ -82,8 +82,8 @@ const mpuTimed = parseARIBTTMLDocument(
     false,
     {ignoreDocumentTiming: true}
 );
-assert(mpuTimed.cues[0].start === 12 && mpuTimed.cues[0].end === 17,
-    'MPU-only timing must ignore TTML document time');
+assert(mpuTimed.cues[0].start === 12 && mpuTimed.cues[0].end === Infinity,
+    'MPU-only timing must remain active until the next presentation');
 const extendedStyle = parseARIBTTMLDocument(
     '<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"><body><p tts:display="none" tts:overflow="visible" tts:padding="4px" tts:showBackground="always" tts:unicodeBidi="embed" tts:visibility="hidden" tts:wrapOption="noWrap" tts:zIndex="4">style</p></body></tt>',
     0,
@@ -183,16 +183,83 @@ const emptySegmentResult = bufferedSegmentRenderer.push({
     packetId: 9,
     subtitleOperationMode: 1,
     subtitleTimingMode: 15,
-    pts: 8000,
+    pts: 12000,
     text: '<tt xmlns="http://www.w3.org/ns/ttml"><head/><body/></tt>'
 });
 assert(emptySegmentResult.documentKind === 'presentation' && emptySegmentResult.cues.length === 0,
     'a structured empty segment must remain distinct from the B62 empty-tt clear command');
 assert(bufferedSegmentRenderer._state.activeCues(5)[0].start === 4,
     'a buffered empty segment must preserve the current presentation until its access-unit time');
-assert(bufferedSegmentRenderer._state.activeCues(8).length === 0 &&
-    bufferedSegmentRenderer._state.activeCues(8.1).length === 0,
+assert(bufferedSegmentRenderer._state.activeCues(10)[0].start === 4,
+    'a no-time-control presentation must not expire after an arbitrary fallback duration');
+assert(bufferedSegmentRenderer._state.activeCues(12).length === 0 &&
+    bufferedSegmentRenderer._state.activeCues(12.1).length === 0,
     'an empty segment must retire the previous presentation from its access-unit time onward');
+const futureClearMedia = document.createElement('video');
+Object.defineProperty(futureClearMedia, 'currentTime', {value: 0, writable: true});
+const futureClearOverlay = document.createElement('div');
+sizeOverlay(futureClearOverlay);
+document.body.append(futureClearMedia, futureClearOverlay);
+const futureClearRenderer = new B62TTMLRenderer({
+    mediaElement: futureClearMedia,
+    overlayElement: futureClearOverlay
+});
+futureClearRenderer.push({
+    packetId: 11,
+    trackKind: 'caption',
+    subtitleOperationMode: 1,
+    subtitleTimingMode: 15,
+    pts: 0,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p>caption</p></body></tt>'
+});
+futureClearRenderer.push({
+    packetId: 12,
+    trackKind: 'superimpose',
+    subtitleOperationMode: 1,
+    subtitleTimingMode: 15,
+    pts: 0,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p>superimpose</p></body></tt>'
+});
+futureClearRenderer.push({
+    packetId: 11,
+    trackKind: 'caption',
+    subtitleOperationMode: 2,
+    subtitleTimingMode: 15,
+    pts: 8000,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"></tt>'
+});
+assert(futureClearRenderer._state.activeCues(7).length === 2,
+    'a future clear must preserve both planes before its access-unit time');
+assert(futureClearRenderer._state.activeCues(8).some((cue) => cue.clear) &&
+    futureClearRenderer._state.activeCues(8).some((cue) => cue.trackKind === 'superimpose'),
+    'a caption clear must become active at its access-unit time without clearing superimpose');
+assert(futureClearRenderer._state.activeCues(8.1).length === 1 &&
+    futureClearRenderer._state.activeCues(8.1)[0].trackKind === 'superimpose',
+    'a completed caption clear must remain a barrier without affecting superimpose');
+futureClearMedia.currentTime = 8.1;
+futureClearRenderer.render();
+assert(!futureClearOverlay.textContent.includes('caption') &&
+    futureClearOverlay.textContent.includes('superimpose'),
+    'a future caption clear must only remove the caption plane from rendered output');
+futureClearRenderer.destroy();
+const programRenderer = new B62TTMLRenderer();
+programRenderer.push({
+    packetId: 13,
+    subtitleOperationMode: 1,
+    subtitleTimingMode: 15,
+    pts: 0,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p>segment</p></body></tt>'
+});
+programRenderer.push({
+    packetId: 13,
+    subtitleOperationMode: 2,
+    subtitleTimingMode: 15,
+    pts: 4000,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p>program</p></body></tt>'
+});
+assert(programRenderer._state.activeCues(3.9)[0].start === 0 &&
+    programRenderer._state.activeCues(4)[0].start === 4,
+    'program mode must replace an untimed segment at its access-unit time');
 const delayedSegmentRenderer = new B62TTMLRenderer({isLive: true});
 delayedSegmentRenderer.push({
     packetId: 10,

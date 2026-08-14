@@ -57,8 +57,11 @@ assert.deepEqual(trackClearState.activeCues(1).map((item) => item.key), ['superi
 const clearState = new B62RendererStateMachine();
 clearState.commitPresentation(clearState.beginPush(captionTrack), [cue('indefinite', 0, Infinity)]);
 clearState.commitPresentation(clearState.beginPush({...captionTrack, mpuSequenceNumber: 11}), [cue('clear', 5, 5.05, true)]);
+assert.deepEqual(clearState.activeCues(4).map((item) => item.key), ['indefinite:event:1:0']);
 assert.equal(clearState.activeCues(5.02)[0].clear, true);
 assert.deepEqual(clearState.activeCues(6), []);
+clearState.prune(100);
+assert.deepEqual(clearState.activeCues(100), []);
 
 const emptyBarrierState = new B62RendererStateMachine();
 emptyBarrierState.commitPresentation(
@@ -72,6 +75,7 @@ emptyBarrierState.commitPresentation(
 );
 assert.deepEqual(emptyBarrierState.activeCues(4).map((item) => item.key), ['indefinite:event:1:0']);
 assert.deepEqual(emptyBarrierState.activeCues(5), []);
+emptyBarrierState.prune(100);
 assert.deepEqual(emptyBarrierState.activeCues(100), []);
 
 const continuationState = new B62RendererStateMachine();

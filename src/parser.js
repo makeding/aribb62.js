@@ -195,7 +195,8 @@ export function parseARIBTTMLDocument(text, basePts, currentTime, forceBaseAlign
 
     const cues = groupRawTTMLCues(rawCues).map((raw) => {
         const start = raw.rawStart !== null ? raw.rawStart + startOffset : (basePts !== null ? basePts : currentTime);
-        let end = raw.rawEnd !== null ? raw.rawEnd + startOffset : start + 5;
+        let end = raw.rawEnd !== null ? raw.rawEnd + startOffset :
+            (options.ignoreDocumentTiming ? Infinity : start + 5);
         if (end <= start) {
             end = start + 0.05;
         }
