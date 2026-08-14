@@ -30,7 +30,7 @@ Document state follows the B62 presentation rules rather than treating every par
 - caption and superimpose packets keep independent presentation state; superimpose is always painted above caption
 
 Pass `trackKind: 'caption' | 'superimpose'` when the demuxer already knows the plane. The renderer also recognizes
-ARIB `subtitleType` (`0` caption, `1` superimpose) and component tags `0x30-0x37` / `0x38-0x3f`.
+ARIB `subtitleType` (`0` caption, `1` superimpose); component tags are not used to infer the plane.
 `setTrackVisibility('caption', false)` hides selectable captions without suppressing superimpose, and
 `clearTrack(packetId)` retires one switched or discontinuous packet without disturbing the other plane.
 

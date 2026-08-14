@@ -43,7 +43,6 @@ assert.equal(state.activeCues(3)[1].trackKind, 'superimpose');
 
 assert.equal(B62StateKeys.trackKind({trackKind: 'superimpose'}), 'superimpose');
 assert.equal(B62StateKeys.trackKind({subtitleType: 1}), 'superimpose');
-assert.equal(B62StateKeys.trackKind({componentTag: 0x38}), 'superimpose');
 assert.equal(B62StateKeys.trackKind({componentTag: 0x30}), 'caption');
 
 const trackClearState = new B62RendererStateMachine();

@@ -15,10 +15,6 @@ function trackKind(data) {
     if (data && Number(data.subtitleType) === 1) {
         return 'superimpose';
     }
-    const componentTag = data && Number(data.componentTag);
-    if (Number.isInteger(componentTag) && (componentTag & 0xff) >= 0x38 && (componentTag & 0xff) <= 0x3f) {
-        return 'superimpose';
-    }
     return 'caption';
 }
 
