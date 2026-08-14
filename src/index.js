@@ -251,9 +251,12 @@ class B62TTMLRenderer {
         const continuedCues = isSubtitleLive(data, this._isLive) ?
             this._state.resolveContinuations(transaction, parsedDocument.continuations) : [];
         const cues = parsedDocument.cues.concat(continuedCues);
+        // Independent presentations become authoritative at the AU time, even
+        // when their first cue starts later or the presentation is empty.
+        const independentPresentationStart = operationMode !== 0 && operationMode !== null ?
+            (effectiveBasePts !== null ? effectiveBasePts : currentTime) : null;
         let presentationCues;
-        if (parsedDocument.kind === 'clear' ||
-            (operationMode !== 0 && operationMode !== null && cues.length === 0)) {
+        if (parsedDocument.kind === 'clear') {
             const start = effectiveBasePts !== null ? effectiveBasePts : currentTime;
             presentationCues = [{
                 key: 'clear:' + start,
@@ -263,7 +266,7 @@ class B62TTMLRenderer {
                 plane: [3840, 2160],
                 blocks: []
             }];
-        } else if (cues.length === 0) {
+        } else if (cues.length === 0 && independentPresentationStart === null) {
             this._pruneCues(currentTime);
             this._releaseUnusedResourceScopes();
             this.render();
@@ -275,7 +278,7 @@ class B62TTMLRenderer {
             presentationCues = cues;
         }
 
-        this._state.commitPresentation(transaction, presentationCues);
+        this._state.commitPresentation(transaction, presentationCues, independentPresentationStart);
         this._pruneCues(currentTime);
         this._releaseUnusedResourceScopes();
         this.render();

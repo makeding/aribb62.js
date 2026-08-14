@@ -190,9 +190,29 @@ assert(emptySegmentResult.documentKind === 'presentation' && emptySegmentResult.
     'a structured empty segment must remain distinct from the B62 empty-tt clear command');
 assert(bufferedSegmentRenderer._state.activeCues(5)[0].start === 4,
     'a buffered empty segment must preserve the current presentation until its access-unit time');
-assert(bufferedSegmentRenderer._state.activeCues(8)[0].clear === true &&
+assert(bufferedSegmentRenderer._state.activeCues(8).length === 0 &&
     bufferedSegmentRenderer._state.activeCues(8.1).length === 0,
     'an empty segment must retire the previous presentation from its access-unit time onward');
+const delayedSegmentRenderer = new B62TTMLRenderer({isLive: true});
+delayedSegmentRenderer.push({
+    packetId: 10,
+    subtitleOperationMode: 0,
+    pts: 0,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="0s" end="indefinite">live</p></body></tt>'
+});
+delayedSegmentRenderer.push({
+    packetId: 10,
+    subtitleOperationMode: 2,
+    subtitleTimingMode: 3,
+    pts: 10000,
+    text: '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="5s">delayed first cue</p></body></tt>'
+});
+assert(delayedSegmentRenderer._state.activeCues(8)[0].start === 0,
+    'an independent future presentation must preserve live state before its access-unit time');
+assert(delayedSegmentRenderer._state.activeCues(10).length === 0,
+    'an independent presentation must establish an empty barrier before its first cue');
+assert(delayedSegmentRenderer._state.activeCues(15)[0].start === 15,
+    'a delayed first cue must appear at its document time within the independent presentation');
 renderer.push({packetId: 1, mpuSequenceNumber: 1, text: sourceText});
 const widthWrapper = overlay.querySelector('[data-aribb62-font-width-ratio]');
 assert(widthWrapper, 'two-value fontSize must create a width-aware glyph wrapper');

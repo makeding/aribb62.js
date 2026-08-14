@@ -119,16 +119,18 @@ export class B62RendererStateMachine {
         };
     }
 
-    commitPresentation(transaction, cues) {
-        if (!transaction || this._lifecycle === 'destroyed' || !cues || cues.length === 0) {
+    commitPresentation(transaction, cues, presentationStart) {
+        if (!transaction || this._lifecycle === 'destroyed' || !cues) {
             return;
         }
-        let start = null;
-        cues.forEach((cue) => {
-            if (Number.isFinite(cue.start) && (start === null || cue.start < start)) {
-                start = cue.start;
-            }
-        });
+        let start = finiteOrNull(presentationStart);
+        if (start === null) {
+            cues.forEach((cue) => {
+                if (Number.isFinite(cue.start) && (start === null || cue.start < start)) {
+                    start = cue.start;
+                }
+            });
+        }
         if (start === null) {
             return;
         }

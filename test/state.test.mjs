@@ -60,6 +60,20 @@ clearState.commitPresentation(clearState.beginPush({...captionTrack, mpuSequence
 assert.equal(clearState.activeCues(5.02)[0].clear, true);
 assert.deepEqual(clearState.activeCues(6), []);
 
+const emptyBarrierState = new B62RendererStateMachine();
+emptyBarrierState.commitPresentation(
+    emptyBarrierState.beginPush(captionTrack),
+    [cue('indefinite', 0, Infinity)]
+);
+emptyBarrierState.commitPresentation(
+    emptyBarrierState.beginPush({...captionTrack, mpuSequenceNumber: 11}),
+    [],
+    5
+);
+assert.deepEqual(emptyBarrierState.activeCues(4).map((item) => item.key), ['indefinite:event:1:0']);
+assert.deepEqual(emptyBarrierState.activeCues(5), []);
+assert.deepEqual(emptyBarrierState.activeCues(100), []);
+
 const continuationState = new B62RendererStateMachine();
 continuationState.commitPresentation(
     continuationState.beginPush({packetId: 1, mpuSequenceNumber: 1}),
